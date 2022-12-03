@@ -2,7 +2,7 @@
 layout: about
 title: About
 permalink: /
-subtitle: <a href='#'>Affiliations</a>. Address. Contacts. Moto. Etc.
+#subtitle: <a href='#'>Affiliations</a>. Address. Contacts. Moto. Etc.
 
 profile:
   align: right
@@ -17,7 +17,24 @@ social: true  # includes social icons at the bottom of the page
 ---
 Welcome to my blog where I post things I learn on my journey to becoming a Cyber Security professional!
 
-Here I will be posting tutorials about techniques and skills I learn. I will also be posting guides on challenges for CTF and HTB challenges which I come across when competing.
+My name is Adam and I am a Cyber Security student at the University of Warwick. I am currently in my third year of University and I am a part of the Cyber Security Society at Warwick. Within cyber, my main interests are:
+- Network Security
+- Web Security
+- Malware Analysis
+- Reverse Engineering
+
+Here on this blog I will be posting about techniques and skills I learn. I will also be posting tutorials on challenges for CTF and HTB challenges which I come across when competing. The main focus of this blog is to help others learn and grow in the Cyber Security field as well as it being a resource I can refer back to in the future. Challenges where I apply my skills will mostly be from:
+- HackTheBox
+- TryHackMe
+- VulnHub
+- CTFs
+- ROPEmporium
+- OverTheWire
+- Exploit.education
+
+and many more sites and resources I come across.
+
+
 
 <!-- {%highlight python lineos %}
 def parot():

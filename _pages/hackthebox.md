@@ -1,17 +1,17 @@
 ---
 layout: page
-title: HackTheBox challenges
+title: Hackthebox
 permalink: /hackthebox/
-description: A growing collection of your cool hackthebox.
+description: The growing collection of cool HackTheBox writeups and tutorials.
 nav: true
 nav_order: 2
-display_categories: [work, fun]
+display_categories: [easy, medium, hard]
 horizontal: false
 ---
 
 <!-- pages/hackthebox.md -->
 <div class="hackthebox">
-{%- if site.enable_hackthebox_categories and page.display_categories %}
+{%- if site.enable_project_categories and page.display_categories %}
   <!-- Display categorized hackthebox -->
   {%- for category in page.display_categories %}
   <h2 class="category">{{ category }}</h2>

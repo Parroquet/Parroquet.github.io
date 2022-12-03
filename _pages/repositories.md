@@ -1,12 +1,12 @@
 ---
 layout: page
 permalink: /repositories/
-title: repositories
-description: Edit the `_data/repositories.yml` and change the `github_users` and `github_repos` lists to include your own GitHub profile and repositories.
+title: Repositories
+description: This is the area where I will be posting a range of github repositories which I have found interesting and useful.
 nav: true
 nav_order: 3
 ---
-
+<!-- Edit the `_data/repositories.yml` and change the `github_users` and `github_repos` lists to include your own GitHub profile and repositories. -->
 ## GitHub users
 
 {% if site.data.repositories.github_users %}

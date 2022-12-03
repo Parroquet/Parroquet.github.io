@@ -4,7 +4,7 @@ title: ha
 description: a hackthebox with a background image
 img: assets/img/5.jpg
 importance: 1
-category: work
+category: easy
 ---
 
 Every hackthebox has a beautiful feature showcase page.
