@@ -1,10 +1,10 @@
 ---
 layout: page
-title: hackthebox 4
-description: another without an image
-img:
-importance: 3
-category: fun
+title: ha
+description: a hackthebox with a background image
+img: assets/img/5.jpg
+importance: 1
+category: work
 ---
 
 Every hackthebox has a beautiful feature showcase page.

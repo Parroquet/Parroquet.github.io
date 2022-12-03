@@ -1,10 +1,9 @@
 ---
 layout: page
-title: hackthebox 3
-description: a hackthebox that redirects to another website
-img: assets/img/7.jpg
-redirect: https://unsplash.com
-importance: 3
+title: ha
+description: a hackthebox with a background image
+img: /assets/img/7.jpg
+importance: 1
 category: work
 ---
 

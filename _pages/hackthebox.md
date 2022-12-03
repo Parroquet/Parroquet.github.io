@@ -1,6 +1,6 @@
 ---
 layout: page
-title: HackTheBox Challenges
+title: HackTheBox challenges
 permalink: /hackthebox/
 description: A growing collection of your cool hackthebox.
 nav: true
